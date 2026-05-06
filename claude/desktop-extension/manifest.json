@@ -1,0 +1,56 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "aclymate",
+  "version": "0.1.0",
+  "display_name": "Aclymate Carbon Accounting",
+  "description": "Estimate your business's carbon footprint, look up emission factors, understand GHG Protocol scopes, and benchmark against industry peers — powered by Aclymate.",
+  "long_description": "Aclymate is the carbon accounting platform built for small and mid-sized businesses. This extension brings Aclymate's SMB carbon accounting data directly into Claude — estimate Scope 1/2/3 footprints by industry and size, look up emission factors with source citations, explain GHG Protocol scopes for any industry, and benchmark a company's emissions against peers. Powered by Aclymate's Climate Brain knowledge system.",
+  "author": {
+    "name": "Aclymate",
+    "url": "https://aclymate.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Aclymate/ai-integrations"
+  },
+  "homepage": "https://aclymate.com",
+  "documentation": "https://github.com/Aclymate/ai-integrations",
+  "support": "mailto:william@aclymate.com",
+  "icon": "icon.png",
+  "license": "MIT",
+  "privacy_policies": [
+    "https://aclymate.com/privacy"
+  ],
+  "keywords": ["carbon-accounting", "sustainability", "ghg-protocol", "emissions", "climate", "scope-1", "scope-2", "scope-3", "smb"],
+  "server": {
+    "type": "node",
+    "entry_point": "node_modules/mcp-remote/dist/proxy.js",
+    "mcp_config": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://aclymate-mcp-933878544994.us-central1.run.app/mcp"]
+    }
+  },
+  "tools": [
+    {
+      "name": "estimate_emissions",
+      "description": "Estimate the annual carbon footprint (tCO2e) for a business — Scope 1/2/3 breakdown and biggest emission drivers"
+    },
+    {
+      "name": "explain_scope",
+      "description": "Explain GHG Protocol Scope 1, 2, or 3 emissions in the context of a specific industry"
+    },
+    {
+      "name": "get_emission_factor",
+      "description": "Look up the emission factor for a specific activity in kg CO2e per unit, with source and caveats"
+    },
+    {
+      "name": "compare_business_footprint",
+      "description": "Benchmark a company's carbon footprint against industry peers"
+    }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin", "win32", "linux"]
+  }
+}
