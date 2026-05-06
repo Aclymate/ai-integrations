@@ -6,7 +6,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/server.js",
+    "start:stdio": "node src/index.js",
     "dev": "doppler run --project aclymate-internal --config dev -- node src/index.js"
   },
   "dependencies": {

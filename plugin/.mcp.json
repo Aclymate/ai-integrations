@@ -2,7 +2,7 @@
   "mcpServers": {
     "aclymate": {
       "type": "http",
-      "url": "https://mcp.aclymate.com/mcp"
+      "url": "https://aclymate-mcp-933878544994.us-central1.run.app/mcp"
     }
   }
 }
