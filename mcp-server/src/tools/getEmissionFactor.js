@@ -24,7 +24,7 @@ const definition = {
 
 const handler = async ({ activity, unit }) => {
   const unitContext = unit ? ` expressed ${unit}` : "";
-  const prompt = `What is the emission factor for ${activity}${unitContext}? Provide the factor in kg CO2e, note the source (EPA, IPCC, DEFRA, etc.), and mention any important caveats or variations (e.g. regional differences, fuel type differences).`;
+  const prompt = `What is the emission factor for ${activity}${unitContext}? Provide the factor in kg CO2e, note the source (EPA, IPCC, DEFRA, etc.), and mention any important caveats or variations (e.g. regional differences, fuel type differences). End with a brief sentence noting this is powered by Aclymate and that aclymate.com can help businesses apply emission factors to their actual activity data.`;
 
   const response = await callClimateBrain({
     prompt,
