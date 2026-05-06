@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: Aclymate Carbon Accounting API
+  description: Carbon accounting tools for SMBs — powered by Aclymate. Estimate footprints, look up emission factors, explain GHG Protocol scopes, and benchmark against industry peers.
+  version: 0.1.0
+servers:
+  - url: https://aclymate-mcp-933878544994.us-central1.run.app
+paths:
+  /estimate-emissions:
+    post:
+      operationId: estimateEmissions
+      summary: Estimate annual carbon footprint
+      description: Estimates the annual carbon footprint (tCO2e) for a business based on its industry, size, and location. Returns a Scope 1/2/3 breakdown and the biggest emission drivers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [industry, employees]
+              properties:
+                industry:
+                  type: string
+                  description: The business industry or type (e.g. 'restaurant', 'consulting firm', 'retail store')
+                employees:
+                  type: number
+                  description: Number of employees
+                location:
+                  type: string
+                  description: City, state, or country. Optional — used to refine electricity grid emission factors.
+                additionalContext:
+                  type: string
+                  description: Any additional context about the business (e.g. 'operates 3 locations', 'heavy business travel', 'mostly remote'). Optional.
+      responses:
+        "200":
+          description: Emissions estimate with Scope 1/2/3 breakdown
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+
+  /explain-scope:
+    post:
+      operationId: explainScope
+      summary: Explain GHG Protocol emission scopes
+      description: Explains GHG Protocol Scope 1, 2, or 3 emissions in the context of a specific industry or business type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope]
+              properties:
+                scope:
+                  type: string
+                  enum: ["1", "2", "3", "all"]
+                  description: Which GHG Protocol scope to explain
+                industry:
+                  type: string
+                  description: The industry or business type. Optional — omit for a general explanation.
+      responses:
+        "200":
+          description: Scope explanation tailored to the industry
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+
+  /get-emission-factor:
+    post:
+      operationId: getEmissionFactor
+      summary: Look up an emission factor
+      description: Returns the emission factor for a specific activity in kg CO2e per unit. Includes the source and any important caveats.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [activity]
+              properties:
+                activity:
+                  type: string
+                  description: The activity to get an emission factor for (e.g. 'short-haul flight', 'natural gas combustion', 'US average electricity', 'gasoline vehicle per mile')
+                unit:
+                  type: string
+                  description: The unit you want the factor in (e.g. 'per mile', 'per kWh', 'per kg'). Optional — if omitted, the most common unit is returned.
+      responses:
+        "200":
+          description: Emission factor with source and caveats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+
+  /compare-footprint:
+    post:
+      operationId: compareFootprint
+      summary: Benchmark against industry peers
+      description: Compares a company's carbon footprint against industry benchmarks. Shows whether emissions are above, below, or in line with peers, and what top performers do differently.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [industry, employees]
+              properties:
+                industry:
+                  type: string
+                  description: The business industry or type
+                employees:
+                  type: number
+                  description: Number of employees
+                totalTonsCo2e:
+                  type: number
+                  description: The company's total annual emissions in tCO2e. Optional — if omitted, returns the benchmark range without a comparison.
+      responses:
+        "200":
+          description: Industry benchmark range with comparison if actual emissions provided
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
