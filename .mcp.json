@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "aclymate": {
+      "type": "stdio",
+      "command": "/opt/homebrew/bin/doppler",
+      "args": [
+        "run",
+        "--project",
+        "aclymate-internal",
+        "--config",
+        "dev",
+        "--",
+        "node",
+        "/Users/williamloopesko/Development/ai-integrations/mcp-server/src/index.js"
+      ]
+    }
+  }
+}
