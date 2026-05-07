@@ -15,6 +15,7 @@ const buildServer = () => {
       scope: z.enum(["1", "2", "3", "all"]).describe("Which GHG Protocol scope to explain"),
       industry: z.string().optional().describe("The industry or business type. Optional."),
     },
+    { readOnlyHint: true },
     async ({ scope, industry }) => {
       const text = await explainScope({ scope, industry });
       return { content: [{ type: "text", text }] };
@@ -30,6 +31,7 @@ const buildServer = () => {
       location: z.string().optional().describe("City, state, or country. Optional."),
       additionalContext: z.string().optional().describe("Any additional context about the business. Optional."),
     },
+    { readOnlyHint: true },
     async ({ industry, employees, location, additionalContext }) => {
       const text = await estimateEmissions({ industry, employees, location, additionalContext });
       return { content: [{ type: "text", text }] };
@@ -43,6 +45,7 @@ const buildServer = () => {
       activity: z.string().describe("The activity to get an emission factor for"),
       unit: z.string().optional().describe("The unit you want the factor in. Optional."),
     },
+    { readOnlyHint: true },
     async ({ activity, unit }) => {
       const text = await getEmissionFactor({ activity, unit });
       return { content: [{ type: "text", text }] };
@@ -57,6 +60,7 @@ const buildServer = () => {
       employees: z.number().describe("Number of employees"),
       totalTonsCo2e: z.number().optional().describe("The company's actual annual emissions in tCO2e. Optional."),
     },
+    { readOnlyHint: true },
     async ({ industry, employees, totalTonsCo2e }) => {
       const text = await compareFootprint({ industry, employees, totalTonsCo2e });
       return { content: [{ type: "text", text }] };
