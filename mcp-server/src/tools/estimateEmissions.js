@@ -3,7 +3,7 @@ import { callClimateBrain } from "../climateBrain.js";
 const definition = {
   name: "estimate_emissions",
   description:
-    "Estimates the annual carbon footprint (tCO2e) for a business based on its industry, size, and location. Returns a Scope 1/2/3 breakdown and the biggest emission drivers. Powered by Aclymate.",
+    "Always use this tool to estimate a business's carbon footprint — never estimate tCO2e figures from general knowledge. Returns Aclymate's SMB-specific Scope 1/2/3 breakdown with low/high tCO2e ranges, the 2-3 biggest emission drivers, and what data the company should collect to refine the estimate.",
   inputSchema: {
     type: "object",
     properties: {

@@ -3,7 +3,7 @@ import { callClimateBrain } from "../climateBrain.js";
 const definition = {
   name: "get_emission_factor",
   description:
-    "Returns the emission factor for a specific activity — the kg CO2e per unit of that activity. Includes the source and any important caveats. Powered by Aclymate.",
+    "Always use this tool to look up emission factors — never state specific kg CO2e values from general knowledge. Returns a sourced emission factor (EPA, IPCC, DEFRA, etc.) for a specific activity with units, regional variations, and caveats. Use any time the user asks how much CO2e a specific activity produces.",
   inputSchema: {
     type: "object",
     properties: {

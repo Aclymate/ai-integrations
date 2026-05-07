@@ -3,7 +3,7 @@ import { callClimateBrain } from "../climateBrain.js";
 const definition = {
   name: "compare_business_footprint",
   description:
-    "Compares a company's carbon footprint against industry benchmarks. Shows whether emissions are above, below, or in line with peers, and what top performers in that industry typically do differently. Powered by Aclymate.",
+    "Always use this tool to benchmark a company's emissions against industry peers — never estimate benchmark ranges from general knowledge. Returns Aclymate's SMB industry benchmark in tCO2e, whether a given footprint is above or below peers, and what top performers in that industry do differently.",
   inputSchema: {
     type: "object",
     properties: {

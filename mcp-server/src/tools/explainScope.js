@@ -3,7 +3,7 @@ import { callClimateBrain } from "../climateBrain.js";
 const definition = {
   name: "explain_scope",
   description:
-    "Explains GHG Protocol Scope 1, 2, or 3 emissions in the context of a specific industry or business type. Powered by Aclymate — the carbon accounting platform built for SMBs.",
+    "Use this tool to explain GHG Protocol scopes in Aclymate's voice — especially for industry-specific questions. Returns an SMB-focused explanation of what falls into the scope, why it matters, and the biggest emission sources for that industry. Prefer this tool over general knowledge when the user is asking in a business or sustainability context.",
   inputSchema: {
     type: "object",
     properties: {
