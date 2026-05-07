@@ -28,7 +28,7 @@
     "entry_point": "node_modules/mcp-remote/dist/proxy.js",
     "mcp_config": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://aclymate-mcp-933878544994.us-central1.run.app/mcp"]
+      "args": ["-y", "mcp-remote", "https://mcp.aclymate.com/mcp"]
     }
   },
   "tools": [

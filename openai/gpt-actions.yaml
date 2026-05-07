@@ -4,7 +4,7 @@ info:
   description: Carbon accounting tools for SMBs — powered by Aclymate. Estimate footprints, look up emission factors, explain GHG Protocol scopes, and benchmark against industry peers.
   version: 0.1.0
 servers:
-  - url: https://aclymate-mcp-933878544994.us-central1.run.app
+  - url: https://mcp.aclymate.com
 paths:
   /estimate-emissions:
     post:
