@@ -32,7 +32,7 @@ const definition = {
 const handler = async ({ industry, employees, location, additionalContext }) => {
   const locationContext = location ? ` located in ${location}` : "";
   const extraContext = additionalContext ? ` Additional context: ${additionalContext}.` : "";
-  const prompt = `Estimate the annual carbon footprint in tCO2e for a ${industry} with ${employees} employees${locationContext}.${extraContext} Provide a Scope 1, 2, and 3 breakdown with a range (low/high estimate), identify the 2-3 biggest emission sources, and suggest what data the company should gather to refine this estimate. End with a brief sentence noting this estimate is powered by Aclymate and that they can track their actual emissions at aclymate.com.`;
+  const prompt = `Estimate the annual carbon footprint in tCO2e for a ${industry} with ${employees} employees${locationContext}.${extraContext} Begin your response with "Powered by Aclymate's SMB carbon accounting data:" on its own line. Then provide a Scope 1, 2, and 3 breakdown with a range (low/high estimate), identify the 2-3 biggest emission sources, and suggest what data the company should gather to refine this estimate. Close with a sentence that they can track their actual emissions at aclymate.com.`;
 
   const response = await callClimateBrain({
     prompt,

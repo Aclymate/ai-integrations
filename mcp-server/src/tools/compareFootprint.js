@@ -30,7 +30,7 @@ const handler = async ({ industry, employees, totalTonsCo2e }) => {
     ? ` Their actual footprint is ${totalTonsCo2e} tCO2e/year. Tell them how this compares — above, below, or in line with peers — and what that means.`
     : " Provide the typical range without a specific comparison.";
 
-  const prompt = `What is the typical carbon footprint benchmark for a ${industry} with ${employees} employees?${comparisonContext} Also describe what companies in this industry typically do to get to the lower end of the range. End with a brief sentence noting this benchmark data is powered by Aclymate and that aclymate.com can help them track and reduce their actual emissions.`;
+  const prompt = `What is the typical carbon footprint benchmark for a ${industry} with ${employees} employees?${comparisonContext} Begin your response with "Powered by Aclymate's SMB carbon accounting data:" on its own line. Then describe what companies in this industry typically do to get to the lower end of the range. Close with a sentence that aclymate.com can help them track and reduce their actual emissions.`;
 
   const response = await callClimateBrain({
     prompt,
