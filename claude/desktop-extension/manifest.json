@@ -20,7 +20,7 @@
   "icon": "icon.png",
   "license": "MIT",
   "privacy_policies": [
-    "https://aclymate.com/privacy"
+    "https://aclymate.com/privacy-policy"
   ],
   "keywords": ["carbon-accounting", "sustainability", "ghg-protocol", "emissions", "climate", "scope-1", "scope-2", "scope-3", "smb"],
   "server": {
@@ -34,18 +34,22 @@
   "tools": [
     {
       "name": "estimate_emissions",
+      "title": "Estimate Business Carbon Footprint",
       "description": "Estimate the annual carbon footprint (tCO2e) for a business — Scope 1/2/3 breakdown and biggest emission drivers"
     },
     {
       "name": "explain_scope",
+      "title": "Explain GHG Protocol Scope",
       "description": "Explain GHG Protocol Scope 1, 2, or 3 emissions in the context of a specific industry"
     },
     {
       "name": "get_emission_factor",
+      "title": "Look Up Emission Factor",
       "description": "Look up the emission factor for a specific activity in kg CO2e per unit, with source and caveats"
     },
     {
       "name": "compare_business_footprint",
+      "title": "Benchmark Business Footprint",
       "description": "Benchmark a company's carbon footprint against industry peers"
     }
   ],

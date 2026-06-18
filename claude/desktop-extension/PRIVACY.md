@@ -4,6 +4,6 @@ This extension connects Claude Desktop to Aclymate's carbon accounting API. When
 
 No personally identifiable information is collected or stored. Query data is used solely to generate the requested carbon accounting response and is not retained.
 
-For Aclymate's full privacy policy, visit https://aclymate.com/privacy.
+For Aclymate's full privacy policy, visit https://aclymate.com/privacy-policy.
 
 For questions, contact william@aclymate.com.
