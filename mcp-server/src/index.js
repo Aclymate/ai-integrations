@@ -6,6 +6,10 @@ if (!process.env.INTERNAL_API_KEY) {
   process.exit(1);
 }
 
-const server = buildServer();
+// MCP stdio transport is inherently Tier-1 (no HTTP auth channel). The desktop
+// extension's mcp-remote wrapper carries Bearer tokens over HTTP to
+// mcp.aclymate.com/mcp — that path runs through server.js and its auth
+// middleware instead.
+const server = await buildServer();
 const transport = new StdioServerTransport();
 await server.connect(transport);
