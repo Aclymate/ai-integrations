@@ -9,7 +9,7 @@
     "start": "node src/server.js",
     "start:stdio": "node src/index.js",
     "dev": "doppler run --project aclymate-internal --config dev -- node src/index.js",
-    "test": "node scripts/check-tool-parity.mjs && node test/auth.smoke.mjs && node test/tier1-calcs.smoke.mjs",
+    "test": "node scripts/check-tool-parity.mjs && node test/auth.smoke.mjs && node test/tier1-calcs.smoke.mjs && node test/rateLimit.smoke.mjs",
     "test:parity": "node scripts/check-tool-parity.mjs"
   },
   "dependencies": {

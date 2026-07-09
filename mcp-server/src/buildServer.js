@@ -42,6 +42,7 @@ import {
 } from "./tools/calcs/tier1/calculatePetEmissions.js";
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
+import { withRateLimit } from "./middleware/rateLimit.js";
 
 const envelopeToContent = (envelope) => ({
   content: [{ type: "text", text: JSON.stringify(envelope) }],
@@ -56,7 +57,11 @@ const registerCalcTool = (server, { definition, inputShape, handler, getAuth }) 
     { title: definition.title, readOnlyHint: true },
     withTierGate(
       definition.name,
-      async (params) => envelopeToContent(await handler(params)),
+      withRateLimit(
+        definition.name,
+        async (params) => envelopeToContent(await handler(params)),
+        { getAuth }
+      ),
       { getAuth }
     )
   );
@@ -104,10 +109,14 @@ const buildServer = async ({ auth = null } = {}) => {
     { title: "Explain GHG Protocol Scope", readOnlyHint: true },
     withTierGate(
       explainScopeDef.name,
-      async ({ scope, industry }) => {
-        const text = await explainScope({ scope, industry });
-        return { content: [{ type: "text", text }] };
-      },
+      withRateLimit(
+        explainScopeDef.name,
+        async ({ scope, industry }) => {
+          const text = await explainScope({ scope, industry });
+          return { content: [{ type: "text", text }] };
+        },
+        { getAuth }
+      ),
       { getAuth }
     )
   );
@@ -124,10 +133,14 @@ const buildServer = async ({ auth = null } = {}) => {
     { title: "Estimate Business Carbon Footprint", readOnlyHint: true },
     withTierGate(
       estimateDef.name,
-      async ({ industry, employees, location, additionalContext }) => {
-        const text = await estimateEmissions({ industry, employees, location, additionalContext });
-        return { content: [{ type: "text", text }] };
-      },
+      withRateLimit(
+        estimateDef.name,
+        async ({ industry, employees, location, additionalContext }) => {
+          const text = await estimateEmissions({ industry, employees, location, additionalContext });
+          return { content: [{ type: "text", text }] };
+        },
+        { getAuth }
+      ),
       { getAuth }
     )
   );
@@ -142,10 +155,14 @@ const buildServer = async ({ auth = null } = {}) => {
     { title: "Look Up Emission Factor", readOnlyHint: true },
     withTierGate(
       emissionFactorDef.name,
-      async ({ activity, unit }) => {
-        const text = await getEmissionFactor({ activity, unit });
-        return { content: [{ type: "text", text }] };
-      },
+      withRateLimit(
+        emissionFactorDef.name,
+        async ({ activity, unit }) => {
+          const text = await getEmissionFactor({ activity, unit });
+          return { content: [{ type: "text", text }] };
+        },
+        { getAuth }
+      ),
       { getAuth }
     )
   );
@@ -161,10 +178,14 @@ const buildServer = async ({ auth = null } = {}) => {
     { title: "Benchmark Business Footprint", readOnlyHint: true },
     withTierGate(
       compareDef.name,
-      async ({ industry, employees, totalTonsCo2e }) => {
-        const text = await compareFootprint({ industry, employees, totalTonsCo2e });
-        return { content: [{ type: "text", text }] };
-      },
+      withRateLimit(
+        compareDef.name,
+        async ({ industry, employees, totalTonsCo2e }) => {
+          const text = await compareFootprint({ industry, employees, totalTonsCo2e });
+          return { content: [{ type: "text", text }] };
+        },
+        { getAuth }
+      ),
       { getAuth }
     )
   );
