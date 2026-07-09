@@ -52,6 +52,14 @@ const buildSuccessCountdownHint = (callsRemainingToday) => ({
   calls_remaining_today: callsRemainingToday
 });
 
+const tryParseJson = (text) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
 const looksLikeEnvelope = (value) =>
   value !== null &&
   typeof value === "object" &&
@@ -70,9 +78,16 @@ const applySuccessHintToEnvelope = (envelope, callsRemainingToday) => {
   };
 };
 
-const applySuccessHintToMcpResponse = (response, callsRemainingToday) => {
+const applySuccessHintToMcpResponse = (response, callsRemainingToday, toolName) => {
   const content = response?.content;
   if (!Array.isArray(content) || content.length !== 1) {
+    if (Array.isArray(content) && content.length > 1) {
+      emitStructuredWarning({
+        event: "rate_limit_hint_skip_multi_block",
+        toolName,
+        blockCount: content.length
+      });
+    }
     return response;
   }
   const [firstBlock] = content;
@@ -80,6 +95,15 @@ const applySuccessHintToMcpResponse = (response, callsRemainingToday) => {
     return response;
   }
   const parsed = tryParseJson(firstBlock.text);
+  if (parsed === null) {
+    emitStructuredWarning({
+      event: "rate_limit_hint_skip_invalid_json",
+      toolName,
+      detail:
+        "handler returned non-JSON text content — either legacy prose tool (expected) or envelope-serialization bug (unexpected)"
+    });
+    return response;
+  }
   if (!looksLikeEnvelope(parsed)) {
     return response;
   }
@@ -88,14 +112,6 @@ const applySuccessHintToMcpResponse = (response, callsRemainingToday) => {
     ...response,
     content: [{ type: "text", text: JSON.stringify(injected) }]
   };
-};
-
-const tryParseJson = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 };
 
 const buildRateLimitErrorEnvelope = ({ callsRemainingToday }) =>
@@ -135,7 +151,9 @@ const evaluateRateLimit = async (auth) => {
   }
   if (!result.ok) {
     emitStructuredWarning({
-      event: "rate_limit_internalapi_denied",
+      event: "rate_limit_counter_endpoint_bad_invariant",
+      detail:
+        "counter endpoint returned 4xx (denied) but resolveApiKey succeeded — drift between the two auth paths; treating as outage per fail-closed",
       code: result.code
     });
     return { decision: "outage" };
@@ -162,6 +180,14 @@ const attachRateLimitMeta = (req, evaluation) => {
   };
 };
 
+// Ordering: the counter is incremented BEFORE the tool handler runs. If the
+// handler later throws or returns an error envelope, the counter has already
+// been debited — the caller "loses" that quota unit. This is deliberate
+// (debit-first-refund-never — standard rate-limit semantics), matches spec
+// Open Q 3 (only allowed calls are counted; handler failures aren't refunded),
+// and matches how tier-gate composition works (tier gate outer, rate-limit
+// inner). Do NOT flip to "reserve then commit" without also implementing a
+// refund path — a naive flip would leak quota under retries.
 const enforceRateLimitForRest = (toolName) => async (req, res) => {
   if (shouldSkip(req.auth)) {
     return { proceed: true };
@@ -216,13 +242,15 @@ const withRateLimit = (toolName, handler, options) => {
       const response = await handler(params, extra);
       return applySuccessHintToMcpResponse(
         response,
-        evaluation.callsRemainingToday
+        evaluation.callsRemainingToday,
+        toolName
       );
     }
     if (evaluation.decision === "blocked") {
       emitStructuredWarning({
         event: "rate_limit_blocked_mcp",
-        toolName
+        toolName,
+        keyMasked: auth.keyId ? auth.keyId.slice(-4) : null
       });
       return buildRateLimitToolResponse(
         buildRateLimitErrorEnvelope({
@@ -240,6 +268,5 @@ export {
   shouldSkip,
   applySuccessHintToEnvelope,
   buildSuccessCountdownHint,
-  STATUS_FOR_CODE,
-  MESSAGE_FOR_CODE
+  STATUS_FOR_CODE
 };

@@ -64,6 +64,32 @@ const stubFetch = (impl) => {
   };
 };
 
+const captureStderr = () => {
+  const captured = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    captured.push(typeof chunk === "string" ? chunk : chunk.toString());
+    return true;
+  };
+  return {
+    captured,
+    restore: () => {
+      process.stderr.write = original;
+    }
+  };
+};
+
+const parseEmittedEvents = (captured) =>
+  captured
+    .map((line) => {
+      try {
+        return JSON.parse(line.trim());
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
 describe("shouldSkip", () => {
   test("anonymous (keyId=null) skips", () => {
     assert.equal(shouldSkip({ keyId: null }), true);
@@ -198,6 +224,78 @@ describe("withRateLimit — success-side upgrade_hint injection into MCP envelop
     }
   });
 
+  test("multi-block content skips injection AND emits `rate_limit_hint_skip_multi_block` warning", async () => {
+    const restore = stubFetch(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          allowed: true,
+          callsRemainingToday: 5,
+          dailyLimit: 200,
+          resetAtIso: "2026-07-10T00:00:00.000Z"
+        })
+    }));
+    const stderr = captureStderr();
+    try {
+      const wrapped = withRateLimit(
+        "t1",
+        async () => ({
+          content: [
+            { type: "text", text: "block A" },
+            { type: "text", text: "block B" }
+          ]
+        }),
+        { getAuth: () => buildAuth() }
+      );
+      const result = await wrapped({}, {});
+      assert.equal(result.content.length, 2);
+      const events = parseEmittedEvents(stderr.captured);
+      const skip = events.find(
+        (e) => e.event === "rate_limit_hint_skip_multi_block"
+      );
+      assert.ok(skip, "expected rate_limit_hint_skip_multi_block warning");
+      assert.equal(skip.blockCount, 2);
+      assert.equal(skip.toolName, "t1");
+    } finally {
+      stderr.restore();
+      restore();
+    }
+  });
+
+  test("non-JSON text content (legacy prose tool) skips injection AND emits `rate_limit_hint_skip_invalid_json` warning", async () => {
+    const restore = stubFetch(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          allowed: true,
+          callsRemainingToday: 5,
+          dailyLimit: 200,
+          resetAtIso: "2026-07-10T00:00:00.000Z"
+        })
+    }));
+    const stderr = captureStderr();
+    try {
+      const wrapped = withRateLimit(
+        "t1",
+        async () => ({ content: [{ type: "text", text: "just prose" }] }),
+        { getAuth: () => buildAuth() }
+      );
+      const result = await wrapped({}, {});
+      assert.equal(result.content[0].text, "just prose");
+      const events = parseEmittedEvents(stderr.captured);
+      const skip = events.find(
+        (e) => e.event === "rate_limit_hint_skip_invalid_json"
+      );
+      assert.ok(skip, "expected rate_limit_hint_skip_invalid_json warning");
+      assert.equal(skip.toolName, "t1");
+    } finally {
+      stderr.restore();
+      restore();
+    }
+  });
+
   test("test-mode key on envelope response: passes through unchanged (no injection, since counter skipped)", async () => {
     let fetchCalled = false;
     const restore = stubFetch(async () => {
@@ -311,7 +409,7 @@ describe("withRateLimit — MCP handler wrapping", () => {
     }
   });
 
-  test("authenticated live key + blocked: returns 429 envelope, does NOT invoke handler", async () => {
+  test("authenticated live key + blocked: returns 429 envelope, does NOT invoke handler, emits keyMasked in warning", async () => {
     let handlerCalled = false;
     const restore = stubFetch(async () => ({
       ok: true,
@@ -324,6 +422,7 @@ describe("withRateLimit — MCP handler wrapping", () => {
           resetAtIso: "2026-07-10T00:00:00.000Z"
         })
     }));
+    const stderr = captureStderr();
     try {
       const wrapped = withRateLimit(
         "t1",
@@ -331,7 +430,7 @@ describe("withRateLimit — MCP handler wrapping", () => {
           handlerCalled = true;
           return { content: [{ type: "text", text: "should-not-run" }] };
         },
-        { getAuth: () => buildAuth() }
+        { getAuth: () => buildAuth({ keyId: "abcdEFGH" }) }
       );
       const result = await wrapped({}, {});
       assert.equal(handlerCalled, false);
@@ -342,7 +441,15 @@ describe("withRateLimit — MCP handler wrapping", () => {
       assert.equal(payload.upgrade_hint.trigger, "rate_limit_429");
       assert.equal(payload.upgrade_hint.cta_url, "https://aclymate.com/ai");
       assert.equal(payload.upgrade_hint.calls_remaining_today, 0);
+      const events = parseEmittedEvents(stderr.captured);
+      const blocked = events.find(
+        (e) => e.event === "rate_limit_blocked_mcp"
+      );
+      assert.ok(blocked, "expected rate_limit_blocked_mcp warning");
+      assert.equal(blocked.keyMasked, "EFGH");
+      assert.equal(blocked.toolName, "t1");
     } finally {
+      stderr.restore();
       restore();
     }
   });
@@ -374,13 +481,14 @@ describe("withRateLimit — MCP handler wrapping", () => {
     }
   });
 
-  test("internalApi denied (4xx): also returns 503 (fail-closed — treat resolve error as outage, not 429)", async () => {
+  test("internalApi denied (4xx): also returns 503 (fail-closed — treat resolve error as outage, not 429) AND emits bad-invariant warning", async () => {
     const restore = stubFetch(async () => ({
       ok: false,
       status: 401,
       text: async () =>
         JSON.stringify({ error: true, code: "invalid_api_key", message: "gone" })
     }));
+    const stderr = captureStderr();
     try {
       const wrapped = withRateLimit(
         "t1",
@@ -391,7 +499,17 @@ describe("withRateLimit — MCP handler wrapping", () => {
       assert.equal(result.isError, true);
       const payload = JSON.parse(result.content[0].text);
       assert.equal(payload.error.code, "internal_api_unavailable");
+      const events = parseEmittedEvents(stderr.captured);
+      const badInvariant = events.find(
+        (e) => e.event === "rate_limit_counter_endpoint_bad_invariant"
+      );
+      assert.ok(
+        badInvariant,
+        "expected rate_limit_counter_endpoint_bad_invariant warning (not the old 'denied' event name)"
+      );
+      assert.equal(badInvariant.code, "invalid_api_key");
     } finally {
+      stderr.restore();
       restore();
     }
   });
