@@ -20,6 +20,19 @@ const getAudience = () => {
   return audience;
 };
 
+// Localhost bypass — for local dev against the Firebase functions emulator.
+// The companion verifyOidcCaller.js in renew-west accepts requests without an
+// OIDC token when FUNCTIONS_EMULATOR=true AND ENVIRONMENT!==production.
+// Cannot activate on any prod URL by construction.
+const isLocalUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+};
+
 let cachedClientPromise = null;
 
 // Only cache successful client init. A transient failure (e.g. DNS glitch during
@@ -38,13 +51,68 @@ const getClient = () => {
   return cachedClientPromise;
 };
 
-const request = async ({ method, path, body }) => {
-  const client = await getClient();
-  const url = `${getBaseUrl()}${path}`;
+const wrapRequestError = (err) => {
+  const status = err.response?.status ?? err.status ?? null;
+  const isTimeout =
+    err.name === "AbortError" || err.code === "ERR_CANCELED";
+  const wrapped = new Error(
+    isTimeout ? "internal_api_timeout" : err.message || "internal_api_unreachable"
+  );
+  wrapped.isTimeout = isTimeout;
+  wrapped.isNetworkError = !err.response && !err.status && !isTimeout;
+  wrapped.status = status;
+  wrapped.body = err.response?.data ?? err.body ?? null;
+  if (status && status < 500) {
+    wrapped.isResolutionError = true;
+  }
+  return wrapped;
+};
 
+const localRequest = async ({ method, url, body }) => {
   const controller = new AbortController();
   const timeoutTimer = setTimeout(() => controller.abort(), INTERNAL_API_TIMEOUT_MS);
+  const options = {
+    method,
+    headers: {},
+    signal: controller.signal
+  };
+  if (body !== undefined) {
+    options.body = JSON.stringify(body);
+    options.headers["Content-Type"] = "application/json";
+  }
+  try {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    const parsed = text ? JSON.parse(text) : null;
+    if (!response.ok) {
+      const err = new Error(`local emulator request failed: ${response.status}`);
+      err.status = response.status;
+      err.body = parsed;
+      throw err;
+    }
+    return parsed;
+  } finally {
+    clearTimeout(timeoutTimer);
+  }
+};
 
+const request = async ({ method, path, body }) => {
+  const url = `${getBaseUrl()}${path}`;
+
+  if (isLocalUrl(url)) {
+    process.stderr.write(
+      `[internalApi] localhost bypass — request without OIDC (${method} ${path})\n`
+    );
+    try {
+      return await localRequest({ method, url, body });
+    } catch (err) {
+      throw wrapRequestError(err);
+    }
+  }
+
+  const client = await getClient();
+  const controller = new AbortController();
+  const timeoutTimer = setTimeout(() => controller.abort(), INTERNAL_API_TIMEOUT_MS);
   const options = {
     url,
     method,
@@ -55,25 +123,11 @@ const request = async ({ method, path, body }) => {
     options.data = body;
     options.headers = { "Content-Type": "application/json" };
   }
-
   try {
     const response = await client.request(options);
     return response.data;
   } catch (err) {
-    const status = err.response?.status ?? null;
-    const isTimeout =
-      err.name === "AbortError" || err.code === "ERR_CANCELED";
-    const wrapped = new Error(
-      isTimeout ? "internal_api_timeout" : err.message || "internal_api_unreachable"
-    );
-    wrapped.isTimeout = isTimeout;
-    wrapped.isNetworkError = !err.response && !isTimeout;
-    wrapped.status = status;
-    wrapped.body = err.response?.data ?? null;
-    if (status && status < 500) {
-      wrapped.isResolutionError = true;
-    }
-    throw wrapped;
+    throw wrapRequestError(err);
   } finally {
     clearTimeout(timeoutTimer);
   }

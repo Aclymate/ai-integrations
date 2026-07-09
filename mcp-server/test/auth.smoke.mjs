@@ -25,7 +25,7 @@ const {
 } = await import("../src/authContract.js");
 const { __setRegistryForTests } = await import("../src/toolRegistry.js");
 
-const results = [];
+const pending = [];
 let currentGroup = "";
 
 const describe = (name, fn) => {
@@ -34,22 +34,7 @@ const describe = (name, fn) => {
 };
 
 const test = (name, fn) => {
-  const label = `${currentGroup} › ${name}`;
-  try {
-    const result = fn();
-    if (result instanceof Promise) {
-      results.push(
-        result.then(
-          () => ({ label, ok: true }),
-          (err) => ({ label, ok: false, err })
-        )
-      );
-      return;
-    }
-    results.push(Promise.resolve({ label, ok: true }));
-  } catch (err) {
-    results.push(Promise.resolve({ label, ok: false, err }));
-  }
+  pending.push({ label: `${currentGroup} › ${name}`, fn });
 };
 
 const seedThreeTiers = () =>
@@ -251,10 +236,104 @@ describe("buildAnonymousAuth / buildAuthenticatedAuth (single shape source)", ()
   });
 });
 
-// --- runner ---
-const settled = await Promise.all(results);
-const failed = settled.filter((r) => !r.ok);
-settled.forEach((r) => {
+describe("internalApi — localhost bypass (Firebase emulator dev flow)", () => {
+  test("resolveApiKey against http://localhost URL round-trips via fetch (no OIDC)", async () => {
+    process.env.RENEW_WEST_INTERNAL_API_URL = "http://localhost:5001/x/us-central1/internalApi";
+    process.env.RENEW_WEST_INTERNAL_API_AUDIENCE = "http://localhost:5001/x/us-central1/internalApi";
+    const originalFetch = globalThis.fetch;
+    let sawUrl = null;
+    let sawHeaders = null;
+    globalThis.fetch = async (url, opts) => {
+      sawUrl = url;
+      sawHeaders = opts.headers;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          accountId: "co-1",
+          tier: "tier-2",
+          keyId: "k-1",
+          testMode: false,
+          rateLimit: 200
+        })
+      };
+    };
+    try {
+      const { resolveApiKey } = await import(
+        `../src/internalApi.js?nocache=${Date.now()}`
+      );
+      const result = await resolveApiKey("acy_live_tier2_" + "x".repeat(32));
+      assert.equal(result.ok, true);
+      assert.equal(result.data.accountId, "co-1");
+      assert.equal(result.data.tier, "tier-2");
+      assert.equal(sawUrl, "http://localhost:5001/x/us-central1/internalApi/api/v1/api-keys/resolve");
+      assert.equal(sawHeaders["Content-Type"], "application/json");
+      // Should NOT carry an Authorization header — bypass path skips OIDC entirely
+      assert.equal(sawHeaders.Authorization, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("resolveApiKey against http://127.0.0.1 URL also takes the bypass path", async () => {
+    process.env.RENEW_WEST_INTERNAL_API_URL = "http://127.0.0.1:5001/x/us-central1/internalApi";
+    process.env.RENEW_WEST_INTERNAL_API_AUDIENCE = "http://127.0.0.1:5001/x/us-central1/internalApi";
+    const originalFetch = globalThis.fetch;
+    let sawUrl = null;
+    globalThis.fetch = async (url) => {
+      sawUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ tier: "tier-2", accountId: "co-1", keyId: "k-1" })
+      };
+    };
+    try {
+      const { resolveApiKey } = await import(
+        `../src/internalApi.js?nocache=${Date.now()}`
+      );
+      await resolveApiKey("acy_live_tier2_" + "y".repeat(32));
+      assert.match(sawUrl, /^http:\/\/127\.0\.0\.1:5001/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("localhost 4xx response returns {ok:false, kind:'denied'}", async () => {
+    process.env.RENEW_WEST_INTERNAL_API_URL = "http://localhost:5001/x/us-central1/internalApi";
+    process.env.RENEW_WEST_INTERNAL_API_AUDIENCE = "http://localhost:5001/x/us-central1/internalApi";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 401,
+      text: async () => JSON.stringify({ code: "invalid_api_key_format", message: "Malformed API key." })
+    });
+    try {
+      const { resolveApiKey } = await import(
+        `../src/internalApi.js?nocache=${Date.now()}`
+      );
+      const result = await resolveApiKey("not-a-real-key");
+      assert.equal(result.ok, false);
+      assert.equal(result.kind, "denied");
+      assert.equal(result.code, "invalid_api_key_format");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+// --- runner (serial to keep env / fetch mocks hermetic) ---
+const results = [];
+for (const { label, fn } of pending) {
+  try {
+    await fn();
+    results.push({ label, ok: true });
+  } catch (err) {
+    results.push({ label, ok: false, err });
+  }
+}
+const failed = results.filter((r) => !r.ok);
+results.forEach((r) => {
   const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
   console.log(`${icon} ${r.label}`);
   if (!r.ok) {
@@ -262,6 +341,6 @@ settled.forEach((r) => {
   }
 });
 console.log(
-  `\n${settled.length - failed.length}/${settled.length} passed${failed.length ? `, ${failed.length} FAILED` : ""}`
+  `\n${results.length - failed.length}/${results.length} passed${failed.length ? `, ${failed.length} FAILED` : ""}`
 );
 process.exit(failed.length ? 1 : 0);
