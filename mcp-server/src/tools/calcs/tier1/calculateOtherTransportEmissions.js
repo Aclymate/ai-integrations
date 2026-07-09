@@ -10,16 +10,7 @@ import {
   isValidCalcResult
 } from "./factorSnapshot.js";
 
-const { otherTransportationCarbon } = calcs;
-
-const TRANSPORT_TYPES = [
-  "bus",
-  "lightRail",
-  "regionalRail",
-  "intercityRail",
-  "carpool",
-  "walkBike"
-];
+const { otherTransportationCarbon, TRANSPORT_TYPES } = calcs;
 
 const SOURCES = [
   {
@@ -30,7 +21,7 @@ const SOURCES = [
 
 const inputShape = {
   transportationType: z
-    .enum(TRANSPORT_TYPES)
+    .enum([...TRANSPORT_TYPES])
     .describe(
       "Transportation type. One of: bus, lightRail, regionalRail, intercityRail, carpool, walkBike. Required — unknown values are rejected (no silent zero)."
     ),

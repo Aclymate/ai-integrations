@@ -1,8 +1,5 @@
 import { z } from "zod";
-import dayjs from "dayjs";
 import calcs from "@aclymatepackages/calcs/utilities/index.js";
-import utilitiesData from "@aclymatepackages/calcs/data/utilities.js";
-import otherHelpers from "@aclymatepackages/other-helpers";
 import {
   buildErrorEnvelope,
   buildSuccessEnvelope
@@ -13,30 +10,12 @@ import {
   isValidCalcResult
 } from "./factorSnapshot.js";
 
-const { calcElectricEmissionsPerUnitValue, findCarbonTonsPerMwh } = calcs;
-const { usEgridUtilitiesYears, countriesEmissionsFactors } = utilitiesData;
-const { isStateCanadianProvince } = otherHelpers;
-
-const US_EGRID_DATA_YEARS = Object.keys(usEgridUtilitiesYears)
-  .map(Number)
-  .sort((a, b) => a - b);
-
-const resolveDataYear = (requestedYear) => {
-  if (US_EGRID_DATA_YEARS.includes(requestedYear)) {
-    return requestedYear;
-  }
-  const fallback = US_EGRID_DATA_YEARS.reduce(
-    (acc, year) => (year <= requestedYear && year > acc ? year : acc),
-    0
-  );
-  return fallback === 0 ? null : fallback;
-};
-
-const US_EGRIDS = [
-  "AKGD", "AKMS", "AZNM", "CAMX", "ERCT", "FRCC", "HIMS", "HIOA", "MROE",
-  "NEWE", "NYCW", "NYLI", "NYUP", "RFCE", "RFCM", "RFCW", "RMPA", "SPNO",
-  "SPSO", "SRMV", "SRMW", "SRMWV", "SRTV", "SRVC"
-];
+const {
+  calcElectricEmissionsPerUnitValue,
+  findCarbonTonsPerMwh,
+  classifyEGrid,
+  resolveEGridDataYear
+} = calcs;
 
 const SOURCES = [
   {
@@ -86,24 +65,6 @@ const buildValidationError = (parsed) =>
       .join("; "),
     upgradeHint: null
   });
-
-const classifyEGrid = (eGrid) => {
-  if (!eGrid) {
-    return "default_mroe";
-  }
-  if (US_EGRIDS.includes(eGrid)) {
-    return "us_egrid";
-  }
-  if (isStateCanadianProvince(eGrid)) {
-    return "canadian_province";
-  }
-  const countryLookup = countriesEmissionsFactors.find(
-    ({ country, aliases }) =>
-      country === eGrid.toLowerCase() ||
-      aliases.includes(eGrid.toLowerCase())
-  );
-  return countryLookup ? "country" : "unknown";
-};
 
 const handler = async (rawParams) => {
   const parsed = zodSchema.safeParse(rawParams ?? {});
@@ -170,7 +131,7 @@ const handler = async (rawParams) => {
 
   const dataYear =
     eGridClass === "us_egrid" || eGridClass === "default_mroe"
-      ? resolveDataYear(dayjs(parsedDate).year())
+      ? resolveEGridDataYear(parsedDate)
       : null;
 
   return buildSuccessEnvelope({

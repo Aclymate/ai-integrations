@@ -10,7 +10,7 @@ import {
   isValidCalcResult
 } from "./factorSnapshot.js";
 
-const { monthlyDietTypeCarbon } = calcs;
+const { monthlyDietTypeCarbon, DIET_TYPES } = calcs;
 
 const SOURCES = [
   {
@@ -21,7 +21,7 @@ const SOURCES = [
 
 const inputShape = {
   dietType: z
-    .enum(["sad", "had-1", "had-2", "had-3"])
+    .enum([...DIET_TYPES])
     .describe(
       "Diet type. sad = Standard American Diet; had-1/had-2/had-3 = Healthy American Diet tiers 1 (least meat reduction) → 3 (most meat reduction)."
     ),

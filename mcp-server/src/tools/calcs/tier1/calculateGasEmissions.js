@@ -10,7 +10,7 @@ import {
   isValidCalcResult
 } from "./factorSnapshot.js";
 
-const { calcGasEmissionsPerUnitValue } = calcs;
+const { calcGasEmissionsPerUnitValue, GAS_FUEL_UNIT_MAP, GAS_FUEL_TYPES } = calcs;
 
 const SOURCES = [
   {
@@ -19,40 +19,34 @@ const SOURCES = [
   }
 ];
 
-const naturalGasSchema = z.object({
-  fuelType: z.literal("naturalGas"),
-  unit: z.enum(["therms", "mcf", "ccf", "scf", "cubicMeters"]).default("therms"),
-  unitValue: z.number().finite().positive()
-});
+const DEFAULT_UNIT_FOR_FUEL = {
+  naturalGas: "therms",
+  propane: "gallons",
+  heatingOil: "gallons",
+  wood: "cords"
+};
 
-const propaneSchema = z.object({
-  fuelType: z.literal("propane"),
-  unit: z.enum(["scf", "gallons"]).default("gallons"),
-  unitValue: z.number().finite().positive()
-});
+const buildFuelBranch = (fuelType) => {
+  const units = GAS_FUEL_UNIT_MAP[fuelType];
+  const unitSchema =
+    units.length === 1
+      ? z.literal(units[0]).default(units[0])
+      : z.enum([...units]).default(DEFAULT_UNIT_FOR_FUEL[fuelType]);
+  return z.object({
+    fuelType: z.literal(fuelType),
+    unit: unitSchema,
+    unitValue: z.number().finite().positive()
+  });
+};
 
-const heatingOilSchema = z.object({
-  fuelType: z.literal("heatingOil"),
-  unit: z.literal("gallons").default("gallons"),
-  unitValue: z.number().finite().positive()
-});
-
-const woodSchema = z.object({
-  fuelType: z.literal("wood"),
-  unit: z.literal("cords").default("cords"),
-  unitValue: z.number().finite().positive()
-});
-
-const zodSchema = z.discriminatedUnion("fuelType", [
-  naturalGasSchema,
-  propaneSchema,
-  heatingOilSchema,
-  woodSchema
-]);
+const zodSchema = z.discriminatedUnion(
+  "fuelType",
+  GAS_FUEL_TYPES.map(buildFuelBranch)
+);
 
 const inputShape = {
   fuelType: z
-    .enum(["naturalGas", "propane", "heatingOil", "wood"])
+    .enum([...GAS_FUEL_TYPES])
     .describe("Fuel type. Each fuel accepts a specific unit set."),
   unit: z
     .string()

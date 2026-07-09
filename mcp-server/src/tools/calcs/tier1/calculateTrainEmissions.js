@@ -10,7 +10,7 @@ import {
   isValidCalcResult
 } from "./factorSnapshot.js";
 
-const { trainTransportationCarbon } = calcs;
+const { trainTransportationCarbon, TRAIN_TYPES } = calcs;
 
 const SOURCES = [
   {
@@ -26,7 +26,7 @@ const inputShape = {
     .positive()
     .describe("Trip distance in miles. Required."),
   trainType: z
-    .enum(["lightRail", "regionalRail", "intercityRail"])
+    .enum([...TRAIN_TYPES])
     .optional()
     .describe(
       "Rail service type. Omit for the intercity default. Note: setting `isNortheastCorridor: true` overrides this field."
