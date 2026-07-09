@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node src/server.js",
     "start:stdio": "node src/index.js",
-    "dev": "doppler run --project aclymate-internal --config dev -- node src/index.js"
+    "dev": "doppler run --project aclymate-internal --config dev -- node src/index.js",
+    "test": "node test/auth.smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

@@ -5,23 +5,31 @@ import { handler as explainScope } from "./tools/explainScope.js";
 import { handler as estimateEmissions } from "./tools/estimateEmissions.js";
 import { handler as getEmissionFactor } from "./tools/getEmissionFactor.js";
 import { handler as compareFootprint } from "./tools/compareFootprint.js";
-import { authMiddleware, sendJson } from "./middleware/auth.js";
+import { authMiddleware } from "./middleware/auth.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
+import {
+  buildErrorEnvelope,
+  sendJson
+} from "./responseEnvelope.js";
 
-if (!process.env.INTERNAL_API_KEY) {
-  process.stderr.write("INTERNAL_API_KEY is not set\n");
-  process.exit(1);
-}
+const REQUIRED_ENV = [
+  ["INTERNAL_API_KEY", "aclymate-internal knowledgeCompose shared secret"],
+  ["RENEW_WEST_INTERNAL_API_URL", "renew-west internalApi Cloud Run URL"],
+  ["RENEW_WEST_INTERNAL_API_AUDIENCE", "OIDC audience for internalApi"],
+  [
+    "MCP_IP_HASH_SALT",
+    "salt for req.auth.ipHash — without it, ipHash is a public-recipe sha256 that's rainbow-tableable for IPv4"
+  ]
+];
 
-if (!process.env.RENEW_WEST_INTERNAL_API_URL) {
-  process.stderr.write("RENEW_WEST_INTERNAL_API_URL is not set\n");
-  process.exit(1);
-}
-
-if (!process.env.RENEW_WEST_INTERNAL_API_AUDIENCE) {
-  process.stderr.write("RENEW_WEST_INTERNAL_API_AUDIENCE is not set\n");
-  process.exit(1);
-}
+REQUIRED_ENV.forEach(([name, hint]) => {
+  if (!process.env[name]) {
+    process.stderr.write(
+      `[server] ${name} is not set — ${hint}. Run via: doppler run --project aclymate-internal --config dev -- node src/server.js\n`
+    );
+    process.exit(1);
+  }
+});
 
 const PORT = process.env.PORT || 8080;
 
@@ -30,8 +38,33 @@ const parseBody = async (req) => {
   for await (const chunk of req) {
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString());
+  const raw = Buffer.concat(chunks).toString();
+  return JSON.parse(raw);
 };
+
+const sendInvalidJson = (res) =>
+  sendJson(
+    res,
+    400,
+    buildErrorEnvelope({
+      code: "invalid_json",
+      http_status: 400,
+      message: "Request body must be valid JSON.",
+      upgradeHint: null
+    })
+  );
+
+const sendInternalError = (res) =>
+  sendJson(
+    res,
+    500,
+    buildErrorEnvelope({
+      code: "internal_error",
+      http_status: 500,
+      message: "An unexpected error occurred.",
+      upgradeHint: null
+    })
+  );
 
 const withMiddleware = (...middlewares) => async (req, res) => {
   const runMiddleware = async (index) => {
@@ -100,18 +133,49 @@ const handleRestRoute = async (req, res, route) => {
   if (!outcome?.proceed) {
     return;
   }
-  const body = await parseBody(req);
+  let body;
+  try {
+    body = await parseBody(req);
+  } catch (err) {
+    process.stderr.write(
+      JSON.stringify({
+        event: "invalid_json_body",
+        route: route.toolName,
+        message: err.message
+      }) + "\n"
+    );
+    sendInvalidJson(res);
+    return;
+  }
   const result = await route.execute(body);
   sendJson(res, 200, result);
 };
 
+// buildServer({auth}) is called PER REQUEST. Each call captures req.auth in a
+// `getAuth` closure that is threaded into every withTierGate(...) wrap inside
+// buildServer.js. If a future maintainer hoists `buildServer` to module scope
+// to save latency, per-request auth is lost — stale/null/cross-request. Do NOT
+// do that without also passing auth explicitly through the SDK's extra.authInfo.
 const handleMcpRoute = async (req, res) => {
   const chain = withMiddleware(authMiddleware);
   const outcome = await chain(req, res);
   if (!outcome?.proceed) {
     return;
   }
-  const body = await parseBody(req);
+  let body;
+  try {
+    body = await parseBody(req);
+  } catch (err) {
+    process.stderr.write(
+      JSON.stringify({
+        event: "invalid_json_body",
+        route: "/mcp",
+        message: err.message
+      }) + "\n"
+    );
+    sendInvalidJson(res);
+    return;
+  }
   const server = await buildServer({ auth: req.auth });
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
@@ -122,21 +186,35 @@ const handleMcpRoute = async (req, res) => {
 };
 
 const httpServer = createServer(async (req, res) => {
-  if (req.url === "/health" && req.method === "GET") {
-    return sendJson(res, 200, { status: "ok" });
-  }
+  try {
+    if (req.url === "/health" && req.method === "GET") {
+      return sendJson(res, 200, { status: "ok" });
+    }
 
-  const restRoute = restRouteHandlers[req.url];
-  if (req.method === "POST" && restRoute) {
-    return handleRestRoute(req, res, restRoute);
-  }
+    const restRoute = restRouteHandlers[req.url];
+    if (req.method === "POST" && restRoute) {
+      return handleRestRoute(req, res, restRoute);
+    }
 
-  if (req.url === "/mcp" && req.method === "POST") {
-    return handleMcpRoute(req, res);
-  }
+    if (req.url === "/mcp" && req.method === "POST") {
+      return handleMcpRoute(req, res);
+    }
 
-  res.writeHead(404);
-  res.end();
+    res.writeHead(404);
+    res.end();
+  } catch (err) {
+    process.stderr.write(
+      JSON.stringify({
+        event: "unhandled_request_error",
+        url: req.url,
+        method: req.method,
+        message: err.message
+      }) + "\n"
+    );
+    if (!res.headersSent) {
+      sendInternalError(res);
+    }
+  }
 });
 
 ensureRegistryLoaded()

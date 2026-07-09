@@ -19,10 +19,24 @@ const ensureRegistryLoaded = () => {
   return registryLoadPromise;
 };
 
+// Called PER HTTP REQUEST from server.js so `getAuth` closes over that
+// request's `req.auth`. Do NOT hoist to module scope — see the comment
+// on handleMcpRoute in server.js for the failure mode. `withTierGate`
+// enforces `getAuth` at registration time; if you add a new tool below,
+// you MUST pass `{ getAuth }` — the HOC throws otherwise, on purpose.
 const buildServer = async ({ auth = null } = {}) => {
   await ensureRegistryLoaded();
 
-  const getAuth = () => auth;
+  const getAuth = () =>
+    auth || {
+      tier: "tier-1",
+      accountId: null,
+      keyId: null,
+      testMode: false,
+      rateLimit: null,
+      ipHash: null,
+      pendingScoutAuth: false
+    };
   const server = new McpServer({ name: "aclymate", version: "0.1.0" });
 
   server.tool(

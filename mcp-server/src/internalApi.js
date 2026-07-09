@@ -1,5 +1,7 @@
 import { GoogleAuth } from "google-auth-library";
 
+import { normalizeTier } from "./authContract.js";
+
 const INTERNAL_API_TIMEOUT_MS = 5000;
 
 const getBaseUrl = () => {
@@ -20,70 +22,67 @@ const getAudience = () => {
 
 let cachedClientPromise = null;
 
+// Only cache successful client init. A transient failure (e.g. DNS glitch during
+// cold-start) must not poison the singleton — otherwise every subsequent request
+// would reject with the same error until process restart.
 const getClient = () => {
   if (cachedClientPromise) {
     return cachedClientPromise;
   }
   const auth = new GoogleAuth();
-  cachedClientPromise = auth.getIdTokenClient(getAudience());
-  return cachedClientPromise;
-};
-
-const withTimeout = (promise, timeoutMs) =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error("internal_api_timeout"));
-    }, timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
+  const attempt = auth.getIdTokenClient(getAudience());
+  cachedClientPromise = attempt.catch((err) => {
+    cachedClientPromise = null;
+    throw err;
   });
-
-const buildResolutionError = (status, body) => {
-  const err = new Error(body?.message || "internal_api_resolution_error");
-  err.status = status;
-  err.body = body;
-  err.isResolutionError = status >= 400 && status < 500;
-  return err;
+  return cachedClientPromise;
 };
 
 const request = async ({ method, path, body }) => {
   const client = await getClient();
   const url = `${getBaseUrl()}${path}`;
+
+  const controller = new AbortController();
+  const timeoutTimer = setTimeout(() => controller.abort(), INTERNAL_API_TIMEOUT_MS);
+
   const options = {
     url,
     method,
-    responseType: "json"
+    responseType: "json",
+    signal: controller.signal
   };
   if (body !== undefined) {
     options.data = body;
     options.headers = { "Content-Type": "application/json" };
   }
 
-  const response = await withTimeout(
-    client.request(options),
-    INTERNAL_API_TIMEOUT_MS
-  ).catch((err) => {
-    const wrapped = new Error(err.message || "internal_api_unreachable");
-    wrapped.isNetworkError = !err.response;
-    wrapped.status = err.response?.status ?? null;
+  try {
+    const response = await client.request(options);
+    return response.data;
+  } catch (err) {
+    const status = err.response?.status ?? null;
+    const isTimeout =
+      err.name === "AbortError" || err.code === "ERR_CANCELED";
+    const wrapped = new Error(
+      isTimeout ? "internal_api_timeout" : err.message || "internal_api_unreachable"
+    );
+    wrapped.isTimeout = isTimeout;
+    wrapped.isNetworkError = !err.response && !isTimeout;
+    wrapped.status = status;
     wrapped.body = err.response?.data ?? null;
-    if (err.response?.status && err.response.status < 500) {
+    if (status && status < 500) {
       wrapped.isResolutionError = true;
     }
     throw wrapped;
-  });
-
-  return response.data;
+  } finally {
+    clearTimeout(timeoutTimer);
+  }
 };
 
+// Discriminated union return shape:
+//   { ok: true, data: {...} }
+//   { ok: false, kind: "denied", code, status }        — 401/403 from renew-west
+//   { ok: false, kind: "outage", code, status, isTimeout } — 5xx / network / timeout
 const resolveApiKey = async (token) => {
   try {
     const data = await request({
@@ -91,20 +90,31 @@ const resolveApiKey = async (token) => {
       path: "/api/v1/api-keys/resolve",
       body: { token }
     });
-    return { ok: true, data };
+    return {
+      ok: true,
+      data: {
+        accountId: data?.accountId || null,
+        tier: normalizeTier(data?.tier),
+        keyId: data?.keyId || null,
+        testMode: Boolean(data?.testMode),
+        rateLimit: typeof data?.rateLimit === "number" ? data.rateLimit : null
+      }
+    };
   } catch (err) {
     if (err.isResolutionError) {
       return {
         ok: false,
+        kind: "denied",
         code: err.body?.code || "invalid_api_key",
         status: err.status
       };
     }
     return {
       ok: false,
+      kind: "outage",
       code: "internal_api_unavailable",
       status: 503,
-      isOutage: true
+      isTimeout: Boolean(err.isTimeout)
     };
   }
 };
