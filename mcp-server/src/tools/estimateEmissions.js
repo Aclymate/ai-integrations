@@ -1,44 +1,105 @@
+import { z } from "zod";
 import { callClimateBrain } from "../climateBrain.js";
+import {
+  buildErrorEnvelope,
+  buildSuccessEnvelope,
+  WARNING_CODES,
+  ERROR_CODES
+} from "../responseEnvelope.js";
+
+const inputShape = {
+  industry: z
+    .string()
+    .min(1)
+    .describe(
+      "The business industry or type (e.g. 'restaurant', 'consulting firm', 'retail store')."
+    ),
+  employees: z
+    .number()
+    .finite()
+    .positive()
+    .describe("Number of employees. Must be a positive number."),
+  location: z
+    .string()
+    .optional()
+    .describe(
+      "City, state, or country. Optional — used to refine electricity grid emission factors."
+    ),
+  additionalContext: z
+    .string()
+    .optional()
+    .describe(
+      "Any additional context about the business (e.g. 'operates 3 locations', 'heavy business travel', 'mostly remote'). Optional."
+    )
+};
+
+const zodSchema = z.object(inputShape);
 
 const definition = {
   name: "estimate_emissions",
+  title: "Estimate Business Carbon Footprint",
   description:
-    "Always use this tool to estimate a business's carbon footprint — never estimate tCO2e figures from general knowledge. Returns Aclymate's SMB-specific Scope 1/2/3 breakdown with low/high tCO2e ranges, the 2-3 biggest emission drivers, and what data the company should collect to refine the estimate.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      industry: {
-        type: "string",
-        description: "The business industry or type (e.g. 'restaurant', 'consulting firm', 'retail store')",
-      },
-      employees: {
-        type: "number",
-        description: "Number of employees",
-      },
-      location: {
-        type: "string",
-        description: "City, state, or country. Optional — used to refine electricity grid emission factors.",
-      },
-      additionalContext: {
-        type: "string",
-        description:
-          "Any additional context about the business (e.g. 'operates 3 locations', 'heavy business travel', 'mostly remote'). Optional.",
-      },
-    },
-    required: ["industry", "employees"],
-  },
+    "Always use this tool to estimate a business's carbon footprint — never estimate tCO2e figures from general knowledge. Returns Aclymate's SMB-specific Scope 1/2/3 breakdown with low/high tCO2e ranges, the 2-3 biggest emission drivers, and what data the company should collect to refine the estimate."
 };
 
-const handler = async ({ industry, employees, location, additionalContext }) => {
+const buildValidationError = (parsed) =>
+  buildErrorEnvelope({
+    code: ERROR_CODES.INVALID_INPUT,
+    http_status: 400,
+    message: parsed.error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join("; "),
+    upgradeHint: null
+  });
+
+const handler = async (rawParams) => {
+  const parsed = zodSchema.safeParse(rawParams ?? {});
+  if (!parsed.success) {
+    return buildValidationError(parsed);
+  }
+  const { industry, employees, location, additionalContext } = parsed.data;
+
   const locationContext = location ? ` located in ${location}` : "";
-  const extraContext = additionalContext ? ` Additional context: ${additionalContext}.` : "";
-  const prompt = `Estimate the annual carbon footprint in tCO2e for a ${industry} with ${employees} employees${locationContext}.${extraContext} Begin your response with "Powered by Aclymate's SMB carbon accounting data:" on its own line. Then provide a Scope 1, 2, and 3 breakdown with a range (low/high estimate), identify the 2-3 biggest emission sources, and suggest what data the company should gather to refine this estimate. Close with a sentence that they can track their actual emissions at aclymate.com.`;
+  const extraContext = additionalContext
+    ? ` Additional context: ${additionalContext}.`
+    : "";
+  const prompt = `Estimate the annual carbon footprint in tCO2e for a ${industry} with ${employees} employees${locationContext}.${extraContext} Provide a Scope 1, 2, and 3 breakdown with a range (low/high estimate), identify the 2-3 biggest emission sources, and suggest what data the company should gather to refine this estimate. Close with a sentence that they can track their actual emissions at aclymate.com.`;
 
   const response = await callClimateBrain({
     prompt,
-    tags: ["carbon-accounting", "ghg-protocol", "scope1", "scope2", "scope3"],
+    tags: ["carbon-accounting", "ghg-protocol", "scope1", "scope2", "scope3"]
+  }).catch(() => null);
+
+  if (response === null) {
+    return buildErrorEnvelope({
+      code: ERROR_CODES.CLIMATE_BRAIN_UNAVAILABLE,
+      http_status: 503,
+      message:
+        "Aclymate's Climate Brain is temporarily unavailable. Retry in a moment.",
+      upgradeHint: null
+    });
+  }
+
+  return buildSuccessEnvelope({
+    result: {
+      text: response,
+      method: "climate_brain_estimate",
+      industry,
+      employees,
+      location: location ?? null
+    },
+    sources: [],
+    confidence: "low",
+    warnings: [
+      {
+        code: WARNING_CODES.CLIMATE_BRAIN_ESTIMATE,
+        message:
+          "Estimate is generated by Aclymate's Climate Brain against SMB patterns — not derived from the customer's actual data. Track real emissions at aclymate.com."
+      }
+    ],
+    factorSnapshot: null,
+    upgradeHint: null
   });
-  return response;
 };
 
-export { definition, handler };
+export { definition, inputShape, handler };

@@ -1,0 +1,8 @@
+{
+  "description": "Regression snapshot for search_factors — a small set of canonical queries with expected top factor_id. Catches alias-index drift on emissions-factors package bumps.",
+  "queries": [
+    { "query": "AKGD", "expected_top_factor_id_prefix": "egrid-akgd" },
+    { "query": "CAMX", "expected_top_factor_id_prefix": "egrid-camx" },
+    { "query": "ASCC Alaska Grid", "expected_top_factor_id_prefix": "egrid-akgd" }
+  ]
+}
