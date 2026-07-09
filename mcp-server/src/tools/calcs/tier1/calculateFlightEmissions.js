@@ -115,12 +115,12 @@ const handler = async (rawParams) => {
     defaultsUsed: usedDefaultDistance || missingPassClass
   });
 
+  // TODO(upstream calcs 9.x): if flightEmissions is refactored to return
+  // {tCO2e, distance_km}, drop this second flightGcdFromCoordinates call —
+  // it duplicates work the helper already did internally.
   const distanceKmOut =
     usedDistance ??
-    (hasCoordinates
-      ? // helper resolves coords → km internally; recompute for the response
-        calcs.flightGcdFromCoordinates(to, from)
-      : null);
+    (hasCoordinates ? calcs.flightGcdFromCoordinates(to, from) : null);
 
   return buildSuccessEnvelope({
     result: {

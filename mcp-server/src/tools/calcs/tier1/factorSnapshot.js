@@ -21,7 +21,6 @@ const SLUG_MAP = Object.freeze({
 const deriveConfidence = ({
   defaultsUsed = false,
   unknownRegion = false,
-  mismatchedType = false,
   isDefinitionalZero = false
 }) => {
   if (isDefinitionalZero) {
@@ -30,7 +29,7 @@ const deriveConfidence = ({
   if (unknownRegion) {
     return "low";
   }
-  if (defaultsUsed || mismatchedType) {
+  if (defaultsUsed) {
     return "medium";
   }
   return "high";

@@ -105,8 +105,7 @@ const handler = async (rawParams) => {
     : trainType || "intercityRail";
 
   const confidence = deriveConfidence({
-    defaultsUsed: trainTypeDefaulted,
-    mismatchedType: necOverridesType
+    defaultsUsed: trainTypeDefaulted
   });
 
   return buildSuccessEnvelope({

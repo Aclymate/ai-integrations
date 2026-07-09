@@ -68,7 +68,7 @@ test("train — happy path", async () => {
   assert.ok(env.result.tCO2e > 0);
 });
 
-test("train — isNortheastCorridor overrides trainType", async () => {
+test("train — isNortheastCorridor overrides trainType, still high confidence", async () => {
   const env = await train({
     mileage: 200,
     trainType: "lightRail",
@@ -77,6 +77,7 @@ test("train — isNortheastCorridor overrides trainType", async () => {
   assertSuccessEnvelope(env);
   assert.equal(env.result.method, "northeastCorridor");
   assert.ok(env.warnings.find((w) => w.code === "nec_overrides_train_type"));
+  assert.equal(env.confidence, "high");
 });
 
 test("other-transport — walkBike is definitional zero", async () => {

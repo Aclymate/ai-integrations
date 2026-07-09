@@ -20,6 +20,9 @@ const MANIFEST_PATH = resolve(
   "../../claude/desktop-extension/manifest.json"
 );
 
+// Manually maintained: OpenAPI paths use kebab-case; tool names use snake_case.
+// If you add a new tool, add its route here — otherwise the OpenAPI presence
+// check silently skips it. Long-term: derive from server.js:restRouteHandlers.
 const REST_PATH_TO_TOOL_NAME = {
   "/estimate-emissions": "estimate_emissions",
   "/explain-scope": "explain_scope",
@@ -42,7 +45,7 @@ const collectToolFiles = async (dir) => {
       if (entry.isDirectory()) {
         return collectToolFiles(full);
       }
-      if (entry.name.endsWith(".js") && entry.name !== "factorSnapshot.js") {
+      if (entry.name.endsWith(".js")) {
         return [full];
       }
       return [];
