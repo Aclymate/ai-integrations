@@ -5,6 +5,14 @@ import { handler as explainScope } from "./tools/explainScope.js";
 import { handler as estimateEmissions } from "./tools/estimateEmissions.js";
 import { handler as getEmissionFactor } from "./tools/getEmissionFactor.js";
 import { handler as compareFootprint } from "./tools/compareFootprint.js";
+// B-Tier1-calcs — 7 tools (Tier-1 calc-based)
+import { handler as calcFlight } from "./tools/calcs/tier1/calculateFlightEmissions.js";
+import { handler as calcTrain } from "./tools/calcs/tier1/calculateTrainEmissions.js";
+import { handler as calcOtherTransport } from "./tools/calcs/tier1/calculateOtherTransportEmissions.js";
+import { handler as calcElectricity } from "./tools/calcs/tier1/calculateElectricityEmissions.js";
+import { handler as calcGas } from "./tools/calcs/tier1/calculateGasEmissions.js";
+import { handler as calcDiet } from "./tools/calcs/tier1/calculateDietEmissions.js";
+import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
 import {
@@ -121,6 +129,35 @@ const restRouteHandlers = {
       });
       return { result };
     }
+  },
+  // B-Tier1-calcs — 7 REST routes (each returns the FM §4 envelope directly)
+  "/calculate-diet-emissions": {
+    toolName: "calculate_diet_emissions",
+    execute: async (body) => calcDiet(body)
+  },
+  "/calculate-electricity-emissions": {
+    toolName: "calculate_electricity_emissions",
+    execute: async (body) => calcElectricity(body)
+  },
+  "/calculate-flight-emissions": {
+    toolName: "calculate_flight_emissions",
+    execute: async (body) => calcFlight(body)
+  },
+  "/calculate-gas-emissions": {
+    toolName: "calculate_gas_emissions",
+    execute: async (body) => calcGas(body)
+  },
+  "/calculate-other-transport-emissions": {
+    toolName: "calculate_other_transport_emissions",
+    execute: async (body) => calcOtherTransport(body)
+  },
+  "/calculate-pet-emissions": {
+    toolName: "calculate_pet_emissions",
+    execute: async (body) => calcPet(body)
+  },
+  "/calculate-train-emissions": {
+    toolName: "calculate_train_emissions",
+    execute: async (body) => calcTrain(body)
   }
 };
 
@@ -148,7 +185,8 @@ const handleRestRoute = async (req, res, route) => {
     return;
   }
   const result = await route.execute(body);
-  sendJson(res, 200, result);
+  const status = result?.error?.http_status ?? 200;
+  sendJson(res, status, result);
 };
 
 // buildServer({auth}) is called PER REQUEST. Each call captures req.auth in a

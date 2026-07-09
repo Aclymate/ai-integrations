@@ -51,6 +51,41 @@
       "name": "compare_business_footprint",
       "title": "Benchmark Business Footprint",
       "description": "Benchmark a company's carbon footprint against industry peers"
+    },
+    {
+      "name": "calculate_flight_emissions",
+      "title": "Calculate Flight Emissions",
+      "description": "Calculate tCO2e for a flight using Aclymate's DEFRA-based factors — accepts distance in km, coordinate pairs, or defaults to NYC↔LA"
+    },
+    {
+      "name": "calculate_train_emissions",
+      "title": "Calculate Train Emissions",
+      "description": "Calculate tCO2e for a passenger train trip — light rail, regional rail, intercity rail, or Northeast Corridor"
+    },
+    {
+      "name": "calculate_other_transport_emissions",
+      "title": "Calculate Other Transport Emissions",
+      "description": "Calculate tCO2e for bus, rail, carpool, or walk/bike travel — closed enum with no silent zero for unknown types"
+    },
+    {
+      "name": "calculate_electricity_emissions",
+      "title": "Calculate Electricity Emissions",
+      "description": "Calculate tCO2e for electricity usage using EPA eGRID (US), Environment Canada province factors, or the IEA global average"
+    },
+    {
+      "name": "calculate_gas_emissions",
+      "title": "Calculate Gas Emissions",
+      "description": "Calculate tCO2e for natural gas, propane, heating oil, or wood combustion — fuel/unit pairs validated at parse time"
+    },
+    {
+      "name": "calculate_diet_emissions",
+      "title": "Calculate Diet Emissions",
+      "description": "Calculate monthly and annual tCO2e for a diet type (SAD or Healthy American Diet tiers 1–3) across N people"
+    },
+    {
+      "name": "calculate_pet_emissions",
+      "title": "Calculate Pet Emissions",
+      "description": "Calculate monthly and annual tCO2e for pets — dogs, cats, and large dogs (counted at 2× the dog factor)"
     }
   ],
   "compatibility": {
