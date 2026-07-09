@@ -135,3 +135,283 @@ paths:
                 properties:
                   result:
                     type: string
+
+  # B-Tier1-calcs — 7 calc-based tools returning the FM §4 structured envelope
+
+  /calculate-flight-emissions:
+    post:
+      operationId: calculateFlightEmissions
+      summary: Calculate flight emissions
+      description: Calculate tCO2e for a flight using Aclymate's DEFRA-based factors. Pass `distance` in km if you can compute it (preferred), `{to, from}` coordinate objects as an alternative, or omit both for a US-domestic NYC↔LA ballpark.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                distance:
+                  type: number
+                  description: Round-trip distance in kilometers. Preferred input.
+                passClass:
+                  type: string
+                  enum: [economy, premium, business, first]
+                  description: Cabin class. Omit for DEFRA average across classes.
+                to:
+                  type: object
+                  properties:
+                    lat: { type: number }
+                    lng: { type: number }
+                  required: [lat, lng]
+                from:
+                  type: object
+                  properties:
+                    lat: { type: number }
+                    lng: { type: number }
+                  required: [lat, lng]
+      responses:
+        "200":
+          description: Flight emissions envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalcEnvelope"
+
+  /calculate-train-emissions:
+    post:
+      operationId: calculateTrainEmissions
+      summary: Calculate train emissions
+      description: Calculate tCO2e for a passenger train trip. Requires `mileage` in miles. Optional `trainType` (defaults to intercity-other). `isNortheastCorridor: true` overrides `trainType` and applies the NEC factor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mileage]
+              properties:
+                mileage:
+                  type: number
+                  description: Trip distance in miles.
+                trainType:
+                  type: string
+                  enum: [lightRail, regionalRail, intercityRail]
+                  description: Rail service type. Omit for intercity-other default.
+                isNortheastCorridor:
+                  type: boolean
+                  description: True for Amtrak NEC service; overrides trainType.
+      responses:
+        "200":
+          description: Train emissions envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalcEnvelope"
+
+  /calculate-other-transport-emissions:
+    post:
+      operationId: calculateOtherTransportEmissions
+      summary: Calculate other-transport emissions
+      description: Calculate tCO2e for bus, rail, carpool, or walk/bike. Both fields required. Unknown transportation types are rejected — no silent zero.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transportationType, mileage]
+              properties:
+                transportationType:
+                  type: string
+                  enum: [bus, lightRail, regionalRail, intercityRail, carpool, walkBike]
+                  description: Transportation type.
+                mileage:
+                  type: number
+                  description: Trip distance in miles.
+      responses:
+        "200":
+          description: Other-transport emissions envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalcEnvelope"
+
+  /calculate-electricity-emissions:
+    post:
+      operationId: calculateElectricityEmissions
+      summary: Calculate electricity emissions
+      description: Calculate tCO2e for electricity usage. Requires `unitValue` and `unit` (`kwh` or `mwh`). Optional `eGrid` accepts a US eGRID subregion code, a Canadian province, or a country name. Default MROE is a conservative upper-bound US subregion. Optional `date` picks the data year.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unitValue, unit]
+              properties:
+                unitValue:
+                  type: number
+                  description: Positive electricity quantity.
+                unit:
+                  type: string
+                  enum: [kwh, mwh]
+                  description: Only kwh and mwh accepted.
+                eGrid:
+                  type: string
+                  description: US eGRID subregion, Canadian province, or country. Default MROE.
+                date:
+                  type: string
+                  description: Optional ISO date. Data year walks down to closest available.
+      responses:
+        "200":
+          description: Electricity emissions envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalcEnvelope"
+
+  /calculate-gas-emissions:
+    post:
+      operationId: calculateGasEmissions
+      summary: Calculate gas / fuel emissions
+      description: Calculate tCO2e for natural gas, propane, heating oil, or wood combustion. Accepted `unit` depends on `fuelType`. Invalid (fuelType, unit) pairs are rejected at parse time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fuelType, unitValue]
+              properties:
+                fuelType:
+                  type: string
+                  enum: [naturalGas, propane, heatingOil, wood]
+                unit:
+                  type: string
+                  description: >
+                    naturalGas → therms|mcf|ccf|scf|cubicMeters (default therms);
+                    propane → scf|gallons (default gallons);
+                    heatingOil → gallons;
+                    wood → cords.
+                unitValue:
+                  type: number
+                  description: Positive quantity in the specified unit.
+      responses:
+        "200":
+          description: Gas emissions envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalcEnvelope"
+
+  /calculate-diet-emissions:
+    post:
+      operationId: calculateDietEmissions
+      summary: Calculate diet emissions
+      description: Calculate monthly and annual tCO2e for a diet type across N people. sad = Standard American Diet; had-1/had-2/had-3 = Healthy American Diet tiers (had-3 is most plant-forward).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dietType]
+              properties:
+                dietType:
+                  type: string
+                  enum: [sad, had-1, had-2, had-3]
+                numPeople:
+                  type: integer
+                  description: Number of people on this diet. Defaults to 1.
+      responses:
+        "200":
+          description: Diet emissions envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalcEnvelope"
+
+  /calculate-pet-emissions:
+    post:
+      operationId: calculatePetEmissions
+      summary: Calculate pet emissions
+      description: Calculate monthly and annual tCO2e for pets. All counts default to 0. Large dogs count at 2× the dog factor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                numDogs:
+                  type: integer
+                  description: Number of dogs (default 0).
+                numCats:
+                  type: integer
+                  description: Number of cats (default 0).
+                numLargeDogs:
+                  type: integer
+                  description: Number of large dogs (default 0).
+      responses:
+        "200":
+          description: Pet emissions envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalcEnvelope"
+
+components:
+  schemas:
+    CalcEnvelope:
+      type: object
+      description: FM §4 structured response envelope shared across every calc tool.
+      properties:
+        attribution:
+          type: object
+          properties:
+            name: { type: string }
+            url: { type: string }
+            methodology_link:
+              type: string
+              nullable: true
+        result:
+          type: object
+          nullable: true
+          description: Tool-specific payload (e.g. `{ tCO2e, ... }`). Null on error.
+        sources:
+          type: array
+          items:
+            type: object
+        confidence:
+          type: string
+          enum: [low, medium, high]
+          nullable: true
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              message: { type: string }
+        factor_snapshot:
+          type: object
+          nullable: true
+          properties:
+            package: { type: string }
+            version: { type: string }
+        methodology_url:
+          type: string
+          nullable: true
+        view_in_aclymate_url:
+          type: string
+          nullable: true
+        upgrade_hint:
+          type: object
+          nullable: true
+        error:
+          type: object
+          nullable: true
+          properties:
+            code: { type: string }
+            message: { type: string }
+            http_status: { type: integer }

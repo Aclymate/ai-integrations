@@ -4,8 +4,63 @@ import { definition as explainScopeDef, handler as explainScope } from "./tools/
 import { definition as estimateDef, handler as estimateEmissions } from "./tools/estimateEmissions.js";
 import { definition as emissionFactorDef, handler as getEmissionFactor } from "./tools/getEmissionFactor.js";
 import { definition as compareDef, handler as compareFootprint } from "./tools/compareFootprint.js";
+// B-Tier1-calcs — 7 tools (Tier-1 calc-based)
+import {
+  definition as calcFlightDef,
+  inputShape as calcFlightShape,
+  handler as calcFlight
+} from "./tools/calcs/tier1/calculateFlightEmissions.js";
+import {
+  definition as calcTrainDef,
+  inputShape as calcTrainShape,
+  handler as calcTrain
+} from "./tools/calcs/tier1/calculateTrainEmissions.js";
+import {
+  definition as calcOtherTransportDef,
+  inputShape as calcOtherTransportShape,
+  handler as calcOtherTransport
+} from "./tools/calcs/tier1/calculateOtherTransportEmissions.js";
+import {
+  definition as calcElectricityDef,
+  inputShape as calcElectricityShape,
+  handler as calcElectricity
+} from "./tools/calcs/tier1/calculateElectricityEmissions.js";
+import {
+  definition as calcGasDef,
+  inputShape as calcGasShape,
+  handler as calcGas
+} from "./tools/calcs/tier1/calculateGasEmissions.js";
+import {
+  definition as calcDietDef,
+  inputShape as calcDietShape,
+  handler as calcDiet
+} from "./tools/calcs/tier1/calculateDietEmissions.js";
+import {
+  definition as calcPetDef,
+  inputShape as calcPetShape,
+  handler as calcPet
+} from "./tools/calcs/tier1/calculatePetEmissions.js";
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
+
+const envelopeToContent = (envelope) => ({
+  content: [{ type: "text", text: JSON.stringify(envelope) }],
+  ...(envelope.error ? { isError: true } : {})
+});
+
+const registerCalcTool = (server, { definition, inputShape, handler, getAuth }) => {
+  server.tool(
+    definition.name,
+    definition.description,
+    inputShape,
+    { title: definition.title, readOnlyHint: true },
+    withTierGate(
+      definition.name,
+      async (params) => envelopeToContent(await handler(params)),
+      { getAuth }
+    )
+  );
+};
 
 let registryLoadPromise = null;
 
@@ -113,6 +168,50 @@ const buildServer = async ({ auth = null } = {}) => {
       { getAuth }
     )
   );
+
+  // B-Tier1-calcs — 7 tools (ordered alphabetically by tool name)
+  registerCalcTool(server, {
+    definition: calcDietDef,
+    inputShape: calcDietShape,
+    handler: calcDiet,
+    getAuth
+  });
+  registerCalcTool(server, {
+    definition: calcElectricityDef,
+    inputShape: calcElectricityShape,
+    handler: calcElectricity,
+    getAuth
+  });
+  registerCalcTool(server, {
+    definition: calcFlightDef,
+    inputShape: calcFlightShape,
+    handler: calcFlight,
+    getAuth
+  });
+  registerCalcTool(server, {
+    definition: calcGasDef,
+    inputShape: calcGasShape,
+    handler: calcGas,
+    getAuth
+  });
+  registerCalcTool(server, {
+    definition: calcOtherTransportDef,
+    inputShape: calcOtherTransportShape,
+    handler: calcOtherTransport,
+    getAuth
+  });
+  registerCalcTool(server, {
+    definition: calcPetDef,
+    inputShape: calcPetShape,
+    handler: calcPet,
+    getAuth
+  });
+  registerCalcTool(server, {
+    definition: calcTrainDef,
+    inputShape: calcTrainShape,
+    handler: calcTrain,
+    getAuth
+  });
 
   return server;
 };
