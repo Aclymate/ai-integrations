@@ -4,8 +4,39 @@ import { definition as explainScopeDef, handler as explainScope } from "./tools/
 import { definition as estimateDef, handler as estimateEmissions } from "./tools/estimateEmissions.js";
 import { definition as emissionFactorDef, handler as getEmissionFactor } from "./tools/getEmissionFactor.js";
 import { definition as compareDef, handler as compareFootprint } from "./tools/compareFootprint.js";
+import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
+import { withTierGate } from "./middleware/toolTierGate.js";
 
-const buildServer = () => {
+let registryLoadPromise = null;
+
+const ensureRegistryLoaded = () => {
+  if (!registryLoadPromise) {
+    registryLoadPromise = loadToolRegistry().then((tools) => {
+      startRegistryRefresh();
+      return tools;
+    });
+  }
+  return registryLoadPromise;
+};
+
+// Called PER HTTP REQUEST from server.js so `getAuth` closes over that
+// request's `req.auth`. Do NOT hoist to module scope — see the comment
+// on handleMcpRoute in server.js for the failure mode. `withTierGate`
+// enforces `getAuth` at registration time; if you add a new tool below,
+// you MUST pass `{ getAuth }` — the HOC throws otherwise, on purpose.
+const buildServer = async ({ auth = null } = {}) => {
+  await ensureRegistryLoaded();
+
+  const getAuth = () =>
+    auth || {
+      tier: "tier-1",
+      accountId: null,
+      keyId: null,
+      testMode: false,
+      rateLimit: null,
+      ipHash: null,
+      pendingScoutAuth: false
+    };
   const server = new McpServer({ name: "aclymate", version: "0.1.0" });
 
   server.tool(
@@ -16,10 +47,14 @@ const buildServer = () => {
       industry: z.string().optional().describe("The industry or business type. Optional."),
     },
     { title: "Explain GHG Protocol Scope", readOnlyHint: true },
-    async ({ scope, industry }) => {
-      const text = await explainScope({ scope, industry });
-      return { content: [{ type: "text", text }] };
-    }
+    withTierGate(
+      explainScopeDef.name,
+      async ({ scope, industry }) => {
+        const text = await explainScope({ scope, industry });
+        return { content: [{ type: "text", text }] };
+      },
+      { getAuth }
+    )
   );
 
   server.tool(
@@ -32,10 +67,14 @@ const buildServer = () => {
       additionalContext: z.string().optional().describe("Any additional context about the business. Optional."),
     },
     { title: "Estimate Business Carbon Footprint", readOnlyHint: true },
-    async ({ industry, employees, location, additionalContext }) => {
-      const text = await estimateEmissions({ industry, employees, location, additionalContext });
-      return { content: [{ type: "text", text }] };
-    }
+    withTierGate(
+      estimateDef.name,
+      async ({ industry, employees, location, additionalContext }) => {
+        const text = await estimateEmissions({ industry, employees, location, additionalContext });
+        return { content: [{ type: "text", text }] };
+      },
+      { getAuth }
+    )
   );
 
   server.tool(
@@ -46,10 +85,14 @@ const buildServer = () => {
       unit: z.string().optional().describe("The unit you want the factor in. Optional."),
     },
     { title: "Look Up Emission Factor", readOnlyHint: true },
-    async ({ activity, unit }) => {
-      const text = await getEmissionFactor({ activity, unit });
-      return { content: [{ type: "text", text }] };
-    }
+    withTierGate(
+      emissionFactorDef.name,
+      async ({ activity, unit }) => {
+        const text = await getEmissionFactor({ activity, unit });
+        return { content: [{ type: "text", text }] };
+      },
+      { getAuth }
+    )
   );
 
   server.tool(
@@ -61,13 +104,17 @@ const buildServer = () => {
       totalTonsCo2e: z.number().optional().describe("The company's actual annual emissions in tCO2e. Optional."),
     },
     { title: "Benchmark Business Footprint", readOnlyHint: true },
-    async ({ industry, employees, totalTonsCo2e }) => {
-      const text = await compareFootprint({ industry, employees, totalTonsCo2e });
-      return { content: [{ type: "text", text }] };
-    }
+    withTierGate(
+      compareDef.name,
+      async ({ industry, employees, totalTonsCo2e }) => {
+        const text = await compareFootprint({ industry, employees, totalTonsCo2e });
+        return { content: [{ type: "text", text }] };
+      },
+      { getAuth }
+    )
   );
 
   return server;
 };
 
-export { buildServer };
+export { buildServer, ensureRegistryLoaded };
