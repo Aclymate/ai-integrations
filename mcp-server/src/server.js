@@ -1,10 +1,17 @@
 import { createServer } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildServer, ensureRegistryLoaded } from "./buildServer.js";
+// Phase A — 4 envelope-migrated tools
 import { handler as explainScope } from "./tools/explainScope.js";
 import { handler as estimateEmissions } from "./tools/estimateEmissions.js";
 import { handler as getEmissionFactor } from "./tools/getEmissionFactor.js";
 import { handler as compareFootprint } from "./tools/compareFootprint.js";
+// B-Tier1-browse — 5 catalog browse tools
+import { handler as lookupFactorById } from "./tools/browse/lookupFactorById.js";
+import { handler as findFactor } from "./tools/browse/findFactor.js";
+import { handler as searchFactors } from "./tools/browse/searchFactors.js";
+import { handler as listFactorTypes } from "./tools/browse/listFactorTypes.js";
+import { handler as listFactorKeyValues } from "./tools/browse/listFactorKeyValues.js";
 // B-Tier1-calcs — 7 tools (Tier-1 calc-based)
 import { handler as calcFlight } from "./tools/calcs/tier1/calculateFlightEmissions.js";
 import { handler as calcTrain } from "./tools/calcs/tier1/calculateTrainEmissions.js";
@@ -93,46 +100,43 @@ const withMiddleware = (...middlewares) => async (req, res) => {
 };
 
 const restRouteHandlers = {
+  // Phase A — 4 REST routes (envelope-migrated by B-Tier1-browse)
   "/estimate-emissions": {
     toolName: "estimate_emissions",
-    execute: async (body) => {
-      const { industry, employees, location, additionalContext } = body;
-      const result = await estimateEmissions({
-        industry,
-        employees,
-        location,
-        additionalContext
-      });
-      return { result };
-    }
+    execute: async (body) => estimateEmissions(body)
   },
   "/explain-scope": {
     toolName: "explain_scope",
-    execute: async (body) => {
-      const { scope, industry } = body;
-      const result = await explainScope({ scope, industry });
-      return { result };
-    }
+    execute: async (body) => explainScope(body)
   },
   "/get-emission-factor": {
     toolName: "get_emission_factor",
-    execute: async (body) => {
-      const { activity, unit } = body;
-      const result = await getEmissionFactor({ activity, unit });
-      return { result };
-    }
+    execute: async (body) => getEmissionFactor(body)
   },
   "/compare-footprint": {
     toolName: "compare_business_footprint",
-    execute: async (body) => {
-      const { industry, employees, totalTonsCo2e } = body;
-      const result = await compareFootprint({
-        industry,
-        employees,
-        totalTonsCo2e
-      });
-      return { result };
-    }
+    execute: async (body) => compareFootprint(body)
+  },
+  // B-Tier1-browse — 5 REST routes (each returns the FM §4 envelope directly)
+  "/lookup-factor-by-id": {
+    toolName: "lookup_factor_by_id",
+    execute: async (body) => lookupFactorById(body)
+  },
+  "/find-factor": {
+    toolName: "find_factor",
+    execute: async (body) => findFactor(body)
+  },
+  "/search-factors": {
+    toolName: "search_factors",
+    execute: async (body) => searchFactors(body)
+  },
+  "/list-factor-types": {
+    toolName: "list_factor_types",
+    execute: async (body) => listFactorTypes(body)
+  },
+  "/list-factor-key-values": {
+    toolName: "list_factor_key_values",
+    execute: async (body) => listFactorKeyValues(body)
   },
   // B-Tier1-calcs — 7 REST routes (each returns the FM §4 envelope directly)
   "/calculate-diet-emissions": {

@@ -9,11 +9,13 @@
     "start": "node src/server.js",
     "start:stdio": "node src/index.js",
     "dev": "doppler run --project aclymate-internal --config dev -- node src/index.js",
-    "test": "node scripts/check-tool-parity.mjs && node test/auth.smoke.mjs && node test/tier1-calcs.smoke.mjs && node test/rateLimit.smoke.mjs",
+    "test": "node scripts/check-tool-parity.mjs && node test/auth.smoke.mjs && node test/tier1-calcs.smoke.mjs && node test/tier1-browse.smoke.mjs && node test/get-emission-factor.smoke.mjs && node test/explain-scope.smoke.mjs && node test/estimate-emissions.smoke.mjs && node test/compare-footprint.smoke.mjs && node test/rateLimit.smoke.mjs",
     "test:parity": "node scripts/check-tool-parity.mjs"
   },
   "dependencies": {
     "@aclymatepackages/calcs": "^8.2.0",
+    "@aclymatepackages/emissions-factors": "^1.7.1",
+    "@aclymatepackages/mcp-envelope-codes": "^0.1.1",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "google-auth-library": "^9.14.1"
   }

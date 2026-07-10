@@ -3,6 +3,13 @@
 // responseShaper.js middleware will wrap res.json to enforce it uniformly once landed.
 // C4 uses it for auth-layer errors so a caller who fails auth still sees the standard shape.
 
+import { createRequire } from "node:module";
+
+const require_ = createRequire(import.meta.url);
+const { WARNING_CODES, ERROR_CODES } = require_(
+  "@aclymatepackages/mcp-envelope-codes"
+);
+
 const UPGRADE_HINT_URL = "https://aclymate.com/ai";
 
 const ATTRIBUTION_DEFAULT = Object.freeze({
@@ -11,7 +18,13 @@ const ATTRIBUTION_DEFAULT = Object.freeze({
   methodology_link: null
 });
 
-const buildErrorEnvelope = ({ code, http_status, message, upgradeHint = null }) => ({
+const buildErrorEnvelope = ({
+  code,
+  http_status,
+  message,
+  details = null,
+  upgradeHint = null
+}) => ({
   attribution: { ...ATTRIBUTION_DEFAULT },
   result: null,
   sources: [],
@@ -21,7 +34,12 @@ const buildErrorEnvelope = ({ code, http_status, message, upgradeHint = null }) 
   methodology_url: null,
   view_in_aclymate_url: null,
   upgrade_hint: upgradeHint,
-  error: { code, message, http_status }
+  error: {
+    code,
+    message,
+    http_status,
+    ...(details ? { details } : {})
+  }
 });
 
 const buildSuccessEnvelope = ({
@@ -61,6 +79,8 @@ const sendErrorEnvelope = (res, { code, http_status, message, upgradeHint }) =>
 export {
   UPGRADE_HINT_URL,
   ATTRIBUTION_DEFAULT,
+  WARNING_CODES,
+  ERROR_CODES,
   buildErrorEnvelope,
   buildSuccessEnvelope,
   sendJson,

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Aclymate Carbon Accounting API
-  description: Carbon accounting tools for SMBs — powered by Aclymate. Estimate footprints, look up emission factors, explain GHG Protocol scopes, and benchmark against industry peers.
+  description: Carbon accounting tools for SMBs — powered by Aclymate. Estimate footprints, look up emission factors, explain GHG Protocol scopes, browse the factor catalog, and benchmark against industry peers. All responses use Aclymate's FM §4 structured envelope.
   version: 0.1.0
 servers:
   - url: https://mcp.aclymate.com
@@ -10,7 +10,7 @@ paths:
     post:
       operationId: estimateEmissions
       summary: Estimate annual carbon footprint
-      description: Estimates the annual carbon footprint (tCO2e) for a business based on its industry, size, and location. Returns a Scope 1/2/3 breakdown and the biggest emission drivers.
+      description: Estimates the annual carbon footprint (tCO2e) for a business based on its industry, size, and location. Returns a Scope 1/2/3 breakdown and the biggest emission drivers as structured envelope fields.
       requestBody:
         required: true
         content:
@@ -33,14 +33,11 @@ paths:
                   description: Any additional context about the business (e.g. 'operates 3 locations', 'heavy business travel', 'mostly remote'). Optional.
       responses:
         "200":
-          description: Emissions estimate with Scope 1/2/3 breakdown
+          description: Emissions estimate envelope with Scope 1/2/3 breakdown
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    type: string
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /explain-scope:
     post:
@@ -64,20 +61,17 @@ paths:
                   description: The industry or business type. Optional — omit for a general explanation.
       responses:
         "200":
-          description: Scope explanation tailored to the industry
+          description: Scope explanation envelope tailored to the industry
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    type: string
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /get-emission-factor:
     post:
       operationId: getEmissionFactor
       summary: Look up an emission factor
-      description: Returns the emission factor for a specific activity in kg CO2e per unit. Includes the source and any important caveats.
+      description: Returns the emission factor for a specific activity. On canonical hit, returns a structured value/source block. On miss, falls back to Aclymate's Climate Brain (marked with `climate_brain_fallback` warning + low confidence).
       requestBody:
         required: true
         content:
@@ -94,14 +88,11 @@ paths:
                   description: The unit you want the factor in (e.g. 'per mile', 'per kWh', 'per kg'). Optional — if omitted, the most common unit is returned.
       responses:
         "200":
-          description: Emission factor with source and caveats
+          description: Emission factor envelope with source, confidence, and warnings
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    type: string
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /compare-footprint:
     post:
@@ -127,14 +118,143 @@ paths:
                   description: The company's total annual emissions in tCO2e. Optional — if omitted, returns the benchmark range without a comparison.
       responses:
         "200":
-          description: Industry benchmark range with comparison if actual emissions provided
+          description: Industry benchmark envelope with comparison if actual emissions provided
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    type: string
+                $ref: "#/components/schemas/ToolEnvelope"
+
+  # B-Tier1-browse — 5 catalog browse tools returning the FM §4 structured envelope
+
+  /lookup-factor-by-id:
+    post:
+      operationId: lookupFactorById
+      summary: Look up an emission factor by canonical id
+      description: Deterministic exact-match lookup by `factor_id`. Returns `result: null` with a `factor_not_found` warning if the id is unknown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factor_id]
+              properties:
+                factor_id:
+                  type: string
+                  description: The canonical factor id (e.g. 'egrid-akgd-2019').
+      responses:
+        "200":
+          description: Factor envelope with the matching factor or a factor_not_found warning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolEnvelope"
+
+  /find-factor:
+    post:
+      operationId: findFactor
+      summary: Find an emission factor by keys
+      description: Keyed lookup — returns the first factor matching `factor_type` + `keys`. Assertion mode; empty keys, unknown keys, or no-match all return `result: null` with a descriptive warning.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factor_type]
+              properties:
+                factor_type:
+                  type: string
+                  description: The canonical factor type (e.g. 'egrid', 'flight', 'fuel').
+                keys:
+                  type: object
+                  description: Key/value map identifying the factor (e.g. `{egrid_region: 'AKGD', vintage_year: 2019}`).
+                  additionalProperties:
+                    oneOf:
+                      - type: string
+                      - type: number
+                      - type: boolean
+      responses:
+        "200":
+          description: Factor envelope with the matching factor or a null result + warning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolEnvelope"
+
+  /search-factors:
+    post:
+      operationId: searchFactors
+      summary: Keyword search across the factor catalog
+      description: Keyword search across factor ids, categories, aliases, and search terms. Capped at 25 results; a `result_truncated` warning surfaces the true total. Empty results return an empty list plus a warning, never an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: A keyword or short phrase.
+                factor_type:
+                  type: string
+                  description: Optional — scope the search to a single factor type.
+      responses:
+        "200":
+          description: Search results envelope with up to 25 factors + count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolEnvelope"
+
+  /list-factor-types:
+    post:
+      operationId: listFactorTypes
+      summary: List every factor type in the catalog
+      description: Returns the full sorted list of canonical factor types (e.g. `egrid`, `flight`, `fuel`, `ceda_sector`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Factor types envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolEnvelope"
+
+  /list-factor-key-values:
+    post:
+      operationId: listFactorKeyValues
+      summary: List distinct values for a factor-type key
+      description: Enumerate distinct values for `key_name` under `factor_type`. Omitting `key_name` uses the factor_type's designated drill key with a `drill_key_defaulted` warning.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factor_type]
+              properties:
+                factor_type:
+                  type: string
+                  description: The canonical factor type.
+                key_name:
+                  type: string
+                  description: Optional — the specific key to enumerate (e.g. 'egrid_region').
+      responses:
+        "200":
+          description: Key values envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolEnvelope"
 
   # B-Tier1-calcs — 7 calc-based tools returning the FM §4 structured envelope
 
@@ -175,7 +295,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CalcEnvelope"
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /calculate-train-emissions:
     post:
@@ -206,7 +326,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CalcEnvelope"
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /calculate-other-transport-emissions:
     post:
@@ -234,7 +354,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CalcEnvelope"
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /calculate-electricity-emissions:
     post:
@@ -268,7 +388,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CalcEnvelope"
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /calculate-gas-emissions:
     post:
@@ -302,7 +422,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CalcEnvelope"
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /calculate-diet-emissions:
     post:
@@ -329,7 +449,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CalcEnvelope"
+                $ref: "#/components/schemas/ToolEnvelope"
 
   /calculate-pet-emissions:
     post:
@@ -358,13 +478,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CalcEnvelope"
+                $ref: "#/components/schemas/ToolEnvelope"
 
 components:
   schemas:
-    CalcEnvelope:
+    ToolEnvelope:
       type: object
-      description: FM §4 structured response envelope shared across every calc tool.
+      description: FM §4 structured response envelope shared across every Aclymate MCP tool — catalog browse, calc, estimate, explain, and benchmark.
       properties:
         attribution:
           type: object
@@ -377,7 +497,7 @@ components:
         result:
           type: object
           nullable: true
-          description: Tool-specific payload (e.g. `{ tCO2e, ... }`). Null on error.
+          description: Tool-specific payload (e.g. `{ tCO2e, ... }` for calcs, `{ factor_types: [...] }` for list_factor_types). Null on error or when the query yielded no match.
         sources:
           type: array
           items:
@@ -399,6 +519,9 @@ components:
           properties:
             package: { type: string }
             version: { type: string }
+            git_commit_sha:
+              type: string
+              nullable: true
         methodology_url:
           type: string
           nullable: true

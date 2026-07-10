@@ -35,22 +35,47 @@
     {
       "name": "estimate_emissions",
       "title": "Estimate Business Carbon Footprint",
-      "description": "Estimate the annual carbon footprint (tCO2e) for a business — Scope 1/2/3 breakdown and biggest emission drivers"
+      "description": "Estimate the annual carbon footprint (tCO2e) for a business — returns a Scope 1/2/3 breakdown and biggest emission drivers as structured envelope fields"
     },
     {
       "name": "explain_scope",
       "title": "Explain GHG Protocol Scope",
-      "description": "Explain GHG Protocol Scope 1, 2, or 3 emissions in the context of a specific industry"
+      "description": "Explain GHG Protocol Scope 1, 2, or 3 emissions in the context of a specific industry — returns Aclymate-voiced explanation with confidence and source metadata"
     },
     {
       "name": "get_emission_factor",
       "title": "Look Up Emission Factor",
-      "description": "Look up the emission factor for a specific activity in kg CO2e per unit, with source and caveats"
+      "description": "Look up the emission factor for a specific activity — returns a structured value/source block on canonical hit, Climate Brain fallback on miss"
     },
     {
       "name": "compare_business_footprint",
       "title": "Benchmark Business Footprint",
-      "description": "Benchmark a company's carbon footprint against industry peers"
+      "description": "Benchmark a company's carbon footprint against industry peers — returns a structured envelope with range, comparison, and top-performer patterns"
+    },
+    {
+      "name": "lookup_factor_by_id",
+      "title": "Look Up Emission Factor by ID",
+      "description": "Deterministic exact-match lookup of an emission factor by its canonical `factor_id`. Use search_factors first if the id isn't in hand."
+    },
+    {
+      "name": "find_factor",
+      "title": "Find Emission Factor by Keys",
+      "description": "Keyed lookup — returns the first factor matching a `factor_type` + `keys` combination. Assertion mode; empty or unknown keys return null + a descriptive warning."
+    },
+    {
+      "name": "search_factors",
+      "title": "Search Emission Factors",
+      "description": "Keyword search across the factor catalog — matches ids, categories, aliases, and search terms. Capped at 25 results with truncation warning."
+    },
+    {
+      "name": "list_factor_types",
+      "title": "List Emission Factor Types",
+      "description": "List every emission factor type in Aclymate's canonical catalog. Use before find_factor to enumerate categories."
+    },
+    {
+      "name": "list_factor_key_values",
+      "title": "List Emission Factor Key Values",
+      "description": "Enumerate the distinct values available for a given key under a factor type (e.g. every eGRID region). Omit key_name to use the type's designated drill key."
     },
     {
       "name": "calculate_flight_emissions",
