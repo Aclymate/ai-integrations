@@ -143,7 +143,7 @@ test("get_emission_factor — missing activity rejected as invalid_input", async
   assert.equal(env.error.code, "invalid_input");
 });
 
-test("get_emission_factor — factorsLookup throws → falls through to Climate Brain", async () => {
+test("get_emission_factor — factorsLookup throws → falls through with FACTORS_LOOKUP_UNAVAILABLE (not climate_brain_fallback)", async () => {
   const mockFetch = async (url) => {
     if (url === FACTORS_LOOKUP_URL) {
       return jsonResponse({ error: "boom" }, 500);
@@ -157,6 +157,88 @@ test("get_emission_factor — factorsLookup throws → falls through to Climate 
     const env = await getEmissionFactor({ activity: "anything" });
     assertSuccessEnvelope(env);
     assert.equal(env.confidence, "low");
-    assert.ok(env.warnings.find((w) => w.code === "climate_brain_fallback"));
+    assert.ok(
+      env.warnings.find((w) => w.code === "factors_lookup_unavailable"),
+      "expected factors_lookup_unavailable (not climate_brain_fallback) when lookup backend threw"
+    );
+    assert.equal(
+      env.warnings.find((w) => w.code === "climate_brain_fallback"),
+      undefined,
+      "climate_brain_fallback should not fire when the miss was caused by a lookup throw"
+    );
+  });
+});
+
+test("get_emission_factor — canonical hit with missing value emits MISSING_VALUE + downgrades confidence", async () => {
+  const mockFetch = async (url) => {
+    if (url === FACTORS_LOOKUP_URL) {
+      return jsonResponse({
+        match: {
+          factor_id: "degenerate-1",
+          factor_type: "egrid",
+          source: {
+            name: "EPA eGRID",
+            citation: "test",
+            url: "https://x",
+            vintage_year: 2019
+          }
+        },
+        disambiguation_hint: null
+      });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  await withMockedFetch(mockFetch, async () => {
+    const env = await getEmissionFactor({ activity: "degenerate" });
+    assertSuccessEnvelope(env);
+    assert.ok(
+      env.warnings.find((w) => w.code === "missing_value"),
+      "expected missing_value warning on canonical row with no value"
+    );
+    assert.equal(env.confidence, "low");
+  });
+});
+
+test("get_emission_factor — canonical hit with missing source emits MISSING_SOURCE", async () => {
+  const mockFetch = async (url) => {
+    if (url === FACTORS_LOOKUP_URL) {
+      return jsonResponse({
+        match: {
+          factor_id: "no-source-1",
+          factor_type: "egrid",
+          value: 500,
+          units: "g CO2/kWh"
+        },
+        disambiguation_hint: null
+      });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  await withMockedFetch(mockFetch, async () => {
+    const env = await getEmissionFactor({ activity: "no-source" });
+    assertSuccessEnvelope(env);
+    assert.ok(
+      env.warnings.find((w) => w.code === "missing_source"),
+      "expected missing_source warning on canonical row with no source metadata"
+    );
+    assert.equal(env.sources.length, 0);
+  });
+});
+
+test("get_emission_factor — Climate Brain returns empty string → treated as outage (503 error envelope)", async () => {
+  const mockFetch = async (url) => {
+    if (url === FACTORS_LOOKUP_URL) {
+      return jsonResponse({ match: null });
+    }
+    if (url === CLIMATE_BRAIN_URL) {
+      return jsonResponse({ response: "" });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  await withMockedFetch(mockFetch, async () => {
+    const env = await getEmissionFactor({ activity: "empty" });
+    assert.ok(env.error, "empty CB response should not become silent success");
+    assert.equal(env.error.code, "climate_brain_unavailable");
+    assert.equal(env.error.http_status, 503);
   });
 });

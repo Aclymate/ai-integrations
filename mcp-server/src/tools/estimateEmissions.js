@@ -49,6 +49,7 @@ const buildValidationError = (parsed) =>
     message: parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; "),
+    details: parsed.error.issues,
     upgradeHint: null
   });
 
@@ -63,12 +64,17 @@ const handler = async (rawParams) => {
   const extraContext = additionalContext
     ? ` Additional context: ${additionalContext}.`
     : "";
-  const prompt = `Estimate the annual carbon footprint in tCO2e for a ${industry} with ${employees} employees${locationContext}.${extraContext} Provide a Scope 1, 2, and 3 breakdown with a range (low/high estimate), identify the 2-3 biggest emission sources, and suggest what data the company should gather to refine this estimate. Close with a sentence that they can track their actual emissions at aclymate.com.`;
+  const prompt = `Estimate the annual carbon footprint in tCO2e for a ${industry} with ${employees} employees${locationContext}.${extraContext} Provide a Scope 1, 2, and 3 breakdown with a range (low/high estimate), identify the 2-3 biggest emission sources, and suggest what data the company should gather to refine this estimate.`;
 
   const response = await callClimateBrain({
     prompt,
     tags: ["carbon-accounting", "ghg-protocol", "scope1", "scope2", "scope3"]
-  }).catch(() => null);
+  }).catch((err) => {
+    process.stderr.write(
+      `estimate_emissions: Climate Brain unavailable: ${err.message}\n`
+    );
+    return null;
+  });
 
   if (response === null) {
     return buildErrorEnvelope({

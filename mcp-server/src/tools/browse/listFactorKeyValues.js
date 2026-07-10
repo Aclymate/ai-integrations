@@ -7,6 +7,7 @@ import {
   ERROR_CODES
 } from "../../responseEnvelope.js";
 import { FACTOR_SNAPSHOT } from "./factorSnapshot.js";
+import { validKeyNamesForType } from "./factorKeys.js";
 
 const require_ = createRequire(import.meta.url);
 const emissionsFactors = require_("@aclymatepackages/emissions-factors");
@@ -42,6 +43,7 @@ const buildValidationError = (parsed) =>
     message: parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; "),
+    details: parsed.error.issues,
     upgradeHint: null
   });
 
@@ -80,6 +82,23 @@ const handler = async (rawParams) => {
         {
           code: WARNING_CODES.NO_DRILL_KEY_AVAILABLE,
           message: `factor_type '${factor_type}' has no designated drill key. Supply a key_name explicitly or call find_factor to enumerate.`
+        }
+      ],
+      factorSnapshot: FACTOR_SNAPSHOT,
+      upgradeHint: null
+    });
+  }
+
+  const validKeys = validKeyNamesForType(factor_type);
+  if (key_name && !validKeys.includes(key_name)) {
+    return buildSuccessEnvelope({
+      result: { factor_type, key_name, values: [] },
+      sources: [],
+      confidence: null,
+      warnings: [
+        {
+          code: WARNING_CODES.UNKNOWN_KEY_NAME,
+          message: `Key '${key_name}' is not valid on factor_type '${factor_type}'. Valid keys: [${validKeys.join(", ")}]. Retry with the correct key name.`
         }
       ],
       factorSnapshot: FACTOR_SNAPSHOT,

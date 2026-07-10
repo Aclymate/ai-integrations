@@ -35,6 +35,7 @@ const buildValidationError = (parsed) =>
     message: parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; "),
+    details: parsed.error.issues,
     upgradeHint: null
   });
 
@@ -47,12 +48,17 @@ const handler = async (rawParams) => {
 
   const scopeLabel = scope === "all" ? "Scope 1, 2, and 3" : `Scope ${scope}`;
   const industryContext = industry ? ` for a ${industry}` : "";
-  const prompt = `Explain ${scopeLabel} greenhouse gas emissions${industryContext}. Include what falls into this scope, why it matters, and what the biggest emission sources typically are. Close with a sentence that aclymate.com can help them measure and reduce their actual emissions.`;
+  const prompt = `Explain ${scopeLabel} greenhouse gas emissions${industryContext}. Include what falls into this scope, why it matters, and what the biggest emission sources typically are.`;
 
   const response = await callClimateBrain({
     prompt,
     tags: ["carbon-accounting", "ghg-protocol"]
-  }).catch(() => null);
+  }).catch((err) => {
+    process.stderr.write(
+      `explain_scope: Climate Brain unavailable: ${err.message}\n`
+    );
+    return null;
+  });
 
   if (response === null) {
     return buildErrorEnvelope({

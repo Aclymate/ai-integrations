@@ -170,6 +170,21 @@ test("search_factors — unknown factor_type filter returns empty + UNKNOWN_FACT
   assert.ok(env.warnings.find((w) => w.code === "unknown_factor_type"));
 });
 
+test("search_factors — >25 hits triggers RESULT_TRUNCATED with pre-truncation count", async () => {
+  const env = await searchFactors({ query: "electricity" });
+  assertSuccessEnvelope(env);
+  assert.ok(env.result.factors.length <= 25, "factors capped at 25");
+  if (env.result.count > 25) {
+    const warning = env.warnings.find((w) => w.code === "result_truncated");
+    assert.ok(warning, "expected result_truncated warning");
+    assert.ok(
+      warning.message.includes(String(env.result.count)),
+      `warning should surface the true count ${env.result.count}`
+    );
+    assert.equal(env.result.factors.length, 25);
+  }
+});
+
 test("search_factors — completes fast against heavy ceda_sector type", async () => {
   const t0 = process.hrtime.bigint();
   const env = await searchFactors({ query: "electricity", factor_type: "ceda_sector" });
@@ -220,7 +235,21 @@ test("list_factor_key_values — unknown factor_type returns empty + UNKNOWN_FAC
   assert.ok(env.warnings.find((w) => w.code === "unknown_factor_type"));
 });
 
-test("list_factor_key_values — key_name not on any factor returns empty values (no error)", async () => {
+test("list_factor_key_values — factor_type with no drill key + omitted key_name returns NO_DRILL_KEY_AVAILABLE", async () => {
+  const env = await listFactorKeyValues({ factor_type: "flight" });
+  assertSuccessEnvelope(env);
+  assert.deepEqual(env.result, {
+    factor_type: "flight",
+    key_name: null,
+    values: []
+  });
+  assert.ok(
+    env.warnings.find((w) => w.code === "no_drill_key_available"),
+    "expected no_drill_key_available warning"
+  );
+});
+
+test("list_factor_key_values — nonsense key_name returns empty + UNKNOWN_KEY_NAME (symmetric with find_factor)", async () => {
   const env = await listFactorKeyValues({
     factor_type: "egrid",
     key_name: "not_a_real_key"
@@ -229,6 +258,12 @@ test("list_factor_key_values — key_name not on any factor returns empty values
   assert.equal(env.result.factor_type, "egrid");
   assert.equal(env.result.key_name, "not_a_real_key");
   assert.deepEqual(env.result.values, []);
+  const warning = env.warnings.find((w) => w.code === "unknown_key_name");
+  assert.ok(warning, "expected unknown_key_name warning");
+  assert.ok(
+    warning.message.includes("egrid_region"),
+    "warning should list valid keys"
+  );
 });
 
 // regression fixture — catches alias-index drift on emissions-factors bumps

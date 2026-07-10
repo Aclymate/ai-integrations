@@ -42,6 +42,7 @@ const buildValidationError = (parsed) =>
     message: parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; "),
+    details: parsed.error.issues,
     upgradeHint: null
   });
 
@@ -57,12 +58,17 @@ const handler = async (rawParams) => {
       ? ` Their actual footprint is ${totalTonsCo2e} tCO2e/year. Tell them how this compares — above, below, or in line with peers — and what that means.`
       : " Provide the typical range without a specific comparison.";
 
-  const prompt = `What is the typical carbon footprint benchmark for a ${industry} with ${employees} employees?${comparisonContext} Describe what companies in this industry typically do to get to the lower end of the range. Close with a sentence that aclymate.com can help them track and reduce their actual emissions.`;
+  const prompt = `What is the typical carbon footprint benchmark for a ${industry} with ${employees} employees?${comparisonContext} Describe what companies in this industry typically do to get to the lower end of the range.`;
 
   const response = await callClimateBrain({
     prompt,
     tags: ["carbon-accounting", "benchmarks"]
-  }).catch(() => null);
+  }).catch((err) => {
+    process.stderr.write(
+      `compare_business_footprint: Climate Brain unavailable: ${err.message}\n`
+    );
+    return null;
+  });
 
   if (response === null) {
     return buildErrorEnvelope({

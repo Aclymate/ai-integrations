@@ -18,7 +18,13 @@ const ATTRIBUTION_DEFAULT = Object.freeze({
   methodology_link: null
 });
 
-const buildErrorEnvelope = ({ code, http_status, message, upgradeHint = null }) => ({
+const buildErrorEnvelope = ({
+  code,
+  http_status,
+  message,
+  details = null,
+  upgradeHint = null
+}) => ({
   attribution: { ...ATTRIBUTION_DEFAULT },
   result: null,
   sources: [],
@@ -28,7 +34,12 @@ const buildErrorEnvelope = ({ code, http_status, message, upgradeHint = null }) 
   methodology_url: null,
   view_in_aclymate_url: null,
   upgrade_hint: upgradeHint,
-  error: { code, message, http_status }
+  error: {
+    code,
+    message,
+    http_status,
+    ...(details ? { details } : {})
+  }
 });
 
 const buildSuccessEnvelope = ({

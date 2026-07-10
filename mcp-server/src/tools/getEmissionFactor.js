@@ -40,8 +40,19 @@ const buildValidationError = (parsed) =>
     message: parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; "),
+    details: parsed.error.issues,
     upgradeHint: null
   });
+
+const isEmptyValueBlock = (match) => {
+  const noScalar =
+    typeof match.value !== "number" || match.value === null;
+  const noMap =
+    !match.values ||
+    typeof match.values !== "object" ||
+    Object.keys(match.values).length === 0;
+  return noScalar && noMap;
+};
 
 const buildValueBlock = (match) => {
   if (typeof match.value === "number" && match.units) {
@@ -66,10 +77,75 @@ const buildSourceBlock = (source) => {
 
 const callClimateBrainFallback = async ({ activity, unit }) => {
   const unitContext = unit ? ` expressed ${unit}` : "";
-  const prompt = `What is the emission factor for ${activity}${unitContext}? Provide the factor in kg CO2e, cite only sources you have in your knowledge base, and mention any important caveats or variations (e.g. regional differences, fuel type differences). Do not cite sources you are not certain about. Close with a sentence that aclymate.com can help businesses apply emission factors to their actual activity data.`;
+  const prompt = `What is the emission factor for ${activity}${unitContext}? Provide the factor in kg CO2e, cite only sources you have in your knowledge base, and mention any important caveats or variations (e.g. regional differences, fuel type differences). Do not cite sources you are not certain about.`;
   return callClimateBrain({
     prompt,
     tags: ["carbon-accounting", "emission-factors"]
+  });
+};
+
+const buildCanonicalHitEnvelope = ({ match, disambiguation_hint, activity }) => {
+  const disambiguationList =
+    disambiguation_hint && disambiguation_hint.length > 0
+      ? disambiguation_hint
+      : null;
+  const warnings = [];
+  if (disambiguationList) {
+    warnings.push({
+      code: WARNING_CODES.DISAMBIGUATION_HINT,
+      message: `You may also have meant: ${disambiguationList.join(", ")}.`
+    });
+  }
+  if (isEmptyValueBlock(match)) {
+    warnings.push({
+      code: WARNING_CODES.MISSING_VALUE,
+      message: `Canonical factor '${match.factor_id}' matched but has no numeric value in the catalog — treat this as low-confidence.`
+    });
+  }
+  if (!match.source) {
+    warnings.push({
+      code: WARNING_CODES.MISSING_SOURCE,
+      message: `Canonical factor '${match.factor_id}' matched but has no source metadata in the catalog.`
+    });
+  }
+  return buildSuccessEnvelope({
+    result: {
+      factor_id: match.factor_id,
+      factor_type: match.factor_type,
+      activity,
+      value_block: buildValueBlock(match),
+      source_block: buildSourceBlock(match.source),
+      disambiguation_hint: disambiguationList
+    },
+    sources: match.source ? [match.source] : [],
+    confidence: isEmptyValueBlock(match) ? "low" : "high",
+    warnings,
+    factorSnapshot: FACTOR_SNAPSHOT,
+    upgradeHint: null
+  });
+};
+
+const buildClimateBrainFallbackEnvelope = ({ text, factorsLookupFailed }) => {
+  const warnings = [
+    {
+      code: factorsLookupFailed
+        ? WARNING_CODES.FACTORS_LOOKUP_UNAVAILABLE
+        : WARNING_CODES.CLIMATE_BRAIN_FALLBACK,
+      message: factorsLookupFailed
+        ? "The canonical-factors backend threw an error — this response is an AI-assisted Climate Brain fallback, not derived from a confirmed catalog miss."
+        : "No canonical factor for this activity — response is AI-assisted from Aclymate's Climate Brain, not the canonical catalog."
+    }
+  ];
+  return buildSuccessEnvelope({
+    result: {
+      text,
+      method: "climate_brain_fallback"
+    },
+    sources: [],
+    confidence: "low",
+    warnings,
+    factorSnapshot: null,
+    upgradeHint: null
   });
 };
 
@@ -80,49 +156,33 @@ const handler = async (rawParams) => {
   }
   const { activity, unit } = parsed.data;
 
+  let factorsLookupFailed = false;
   const lookupResult = await callFactorsLookup({
     query: activity,
     context_hints: unit ? { unit } : undefined
   }).catch((err) => {
+    factorsLookupFailed = true;
     process.stderr.write(
-      `factorsLookup unavailable, falling back: ${err.message}\n`
+      `get_emission_factor: factorsLookup unavailable, falling back: ${err.message}\n`
     );
     return null;
   });
 
   if (lookupResult && lookupResult.match) {
-    const { match, disambiguation_hint } = lookupResult;
-    const disambiguationList =
-      disambiguation_hint && disambiguation_hint.length > 0
-        ? disambiguation_hint
-        : null;
-    const warnings = disambiguationList
-      ? [
-          {
-            code: WARNING_CODES.DISAMBIGUATION_HINT,
-            message: `You may also have meant: ${disambiguationList.join(", ")}.`
-          }
-        ]
-      : [];
-    return buildSuccessEnvelope({
-      result: {
-        factor_id: match.factor_id,
-        factor_type: match.factor_type,
-        activity,
-        value_block: buildValueBlock(match),
-        source_block: buildSourceBlock(match.source),
-        disambiguation_hint: disambiguationList
-      },
-      sources: match.source ? [match.source] : [],
-      confidence: "high",
-      warnings,
-      factorSnapshot: FACTOR_SNAPSHOT,
-      upgradeHint: null
+    return buildCanonicalHitEnvelope({
+      match: lookupResult.match,
+      disambiguation_hint: lookupResult.disambiguation_hint,
+      activity
     });
   }
 
   const fallbackText = await callClimateBrainFallback({ activity, unit }).catch(
-    () => null
+    (err) => {
+      process.stderr.write(
+        `get_emission_factor: Climate Brain unavailable: ${err.message}\n`
+      );
+      return null;
+    }
   );
   if (fallbackText === null) {
     return buildErrorEnvelope({
@@ -133,22 +193,9 @@ const handler = async (rawParams) => {
       upgradeHint: null
     });
   }
-  return buildSuccessEnvelope({
-    result: {
-      text: fallbackText,
-      method: "climate_brain_fallback"
-    },
-    sources: [],
-    confidence: "low",
-    warnings: [
-      {
-        code: WARNING_CODES.CLIMATE_BRAIN_FALLBACK,
-        message:
-          "No canonical factor for this activity — response is AI-assisted from Aclymate's Climate Brain, not the canonical catalog."
-      }
-    ],
-    factorSnapshot: null,
-    upgradeHint: null
+  return buildClimateBrainFallbackEnvelope({
+    text: fallbackText,
+    factorsLookupFailed
   });
 };
 

@@ -7,6 +7,7 @@ import {
   ERROR_CODES
 } from "../../responseEnvelope.js";
 import { FACTOR_SNAPSHOT } from "./factorSnapshot.js";
+import { validKeyNamesForType } from "./factorKeys.js";
 
 const require_ = createRequire(import.meta.url);
 const emissionsFactors = require_("@aclymatepackages/emissions-factors");
@@ -44,6 +45,7 @@ const buildValidationError = (parsed) =>
     message: parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; "),
+    details: parsed.error.issues,
     upgradeHint: null
   });
 
@@ -52,17 +54,6 @@ const summarizeTypeList = () => {
   if (all.length <= MAX_INLINE_TYPES) return all.join(", ");
   const shown = all.slice(0, MAX_INLINE_TYPES).join(", ");
   return `${shown}, …and ${all.length - MAX_INLINE_TYPES} more`;
-};
-
-const collectValidKeyNames = (factorType) => {
-  const sample = emissionsFactors
-    .listFactorsByType(factorType)
-    .slice(0, 200);
-  const names = sample.reduce((acc, factor) => {
-    Object.keys(factor.keys || {}).forEach((name) => acc.add(name));
-    return acc;
-  }, new Set());
-  return [...names].sort();
 };
 
 const buildNullEnvelope = ({ warnings }) =>
@@ -96,7 +87,7 @@ const handler = async (rawParams) => {
 
   const hasKeys = keys && Object.keys(keys).length > 0;
   if (!hasKeys) {
-    const validKeys = collectValidKeyNames(factor_type);
+    const validKeys = validKeyNamesForType(factor_type);
     return buildNullEnvelope({
       warnings: [
         {
@@ -107,14 +98,15 @@ const handler = async (rawParams) => {
     });
   }
 
-  const validKeyNames = new Set(collectValidKeyNames(factor_type));
-  const badKey = Object.keys(keys).find((name) => !validKeyNames.has(name));
+  const validKeys = validKeyNamesForType(factor_type);
+  const validKeySet = new Set(validKeys);
+  const badKey = Object.keys(keys).find((name) => !validKeySet.has(name));
   if (badKey) {
     return buildNullEnvelope({
       warnings: [
         {
           code: WARNING_CODES.UNKNOWN_KEY_NAME,
-          message: `Key '${badKey}' is not valid on factor_type '${factor_type}'. Valid keys: [${[...validKeyNames].sort().join(", ")}]. Retry with the correct key name.`
+          message: `Key '${badKey}' is not valid on factor_type '${factor_type}'. Valid keys: [${validKeys.join(", ")}]. Retry with the correct key name.`
         }
       ]
     });

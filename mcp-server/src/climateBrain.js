@@ -16,7 +16,12 @@ const callClimateBrain = async ({ prompt, tags = ["carbon-accounting"], limit = 
   }
 
   const data = await response.json();
-  return data.response || "";
+  if (!data.response || typeof data.response !== "string" || data.response.trim() === "") {
+    throw new Error(
+      `Climate Brain returned an empty response (payload: ${JSON.stringify(data).slice(0, 200)})`
+    );
+  }
+  return data.response;
 };
 
 export { callClimateBrain };
