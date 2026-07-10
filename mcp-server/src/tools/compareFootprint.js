@@ -12,7 +12,11 @@ import {
   deriveConfidence,
   isValidCalcResult
 } from "./calcs/tier1/factorSnapshot.js";
-import { resolveIndustry, resolveLocation } from "./estimate/resolvers.js";
+import {
+  resolveIndustry,
+  resolveLocation,
+  FALLBACK_STATE
+} from "./estimate/resolvers.js";
 
 const { buildDefaultEmissionsObj } = defaultCalcs;
 
@@ -34,6 +38,7 @@ const SOURCES = [
 const inputShape = {
   industry: z
     .string()
+    .trim()
     .min(1)
     .describe("The business industry or type."),
   employees: z
@@ -45,7 +50,7 @@ const inputShape = {
     .string()
     .optional()
     .describe(
-      "City, state, or country. Optional — used to refine the Aclymate benchmark. When omitted, the Aclymate reference state (Colorado) is used."
+      "City, state, or country. Optional — used to refine the Aclymate benchmark. When omitted, Aclymate anchors to its highest-intensity fallback state (Delaware) so the benchmark overshoots rather than under-reports."
     ),
   totalTonsCo2e: z
     .number()
@@ -93,45 +98,57 @@ const derivePosture = (pctVsBenchmark) => {
   return "in_line";
 };
 
+const buildIndustryWarning = (industryResolution, industryString) => {
+  if (industryResolution.match === "exact") {
+    return [];
+  }
+  if (industryResolution.match === "fallback") {
+    return [
+      {
+        code: WARNING_CODES.DEFAULT_USED,
+        message: `Industry '${industryString}' did not match any entry in Aclymate's industries list — used the platform's office-building fallback for the benchmark.`
+      }
+    ];
+  }
+  const matchedLabel = industryResolution.industry?.label ?? null;
+  return [
+    {
+      code: WARNING_CODES.DEFAULT_USED,
+      message: `Industry '${industryString}' matched to Aclymate's '${matchedLabel}' via ${industryResolution.match} lookup — verify this is the intended industry for accurate benchmark comparison.`
+    }
+  ];
+};
+
+const buildLocationWarning = (locationResolution, locationString) => {
+  const fallbackName = FALLBACK_STATE.displayName;
+  if (!locationString) {
+    return [
+      {
+        code: WARNING_CODES.DEFAULT_USED,
+        message: `No location supplied — anchored to Aclymate's highest-intensity fallback state (${fallbackName}) so the benchmark overshoots rather than under-reports. Supply a location for a state-specific benchmark.`
+      }
+    ];
+  }
+  if (locationResolution.match === "unknown") {
+    return [
+      {
+        code: WARNING_CODES.UNKNOWN_REGION,
+        message: `Location '${locationString}' did not resolve to a US state or Canadian province — anchored to Aclymate's highest-intensity fallback state (${fallbackName}).`
+      }
+    ];
+  }
+  return [];
+};
+
 const buildResolutionWarnings = ({
   industryResolution,
   locationResolution,
+  industryString,
   locationString
-}) => {
-  const industryWarning =
-    industryResolution.match === "fallback"
-      ? [
-          {
-            code: WARNING_CODES.DEFAULT_USED,
-            message:
-              "Industry input did not match any entry in Aclymate's industries list — used the platform's office-building fallback for the benchmark."
-          }
-        ]
-      : [];
-
-  const locationWarning = (() => {
-    if (!locationString) {
-      return [
-        {
-          code: WARNING_CODES.DEFAULT_USED,
-          message:
-            "No location supplied — anchored to Aclymate's reference state (Colorado). Supply a location for a state-specific benchmark."
-        }
-      ];
-    }
-    if (locationResolution.match === "unknown") {
-      return [
-        {
-          code: WARNING_CODES.UNKNOWN_REGION,
-          message: `Location '${locationString}' did not resolve to a US state or Canadian province — anchored to Aclymate's reference state (Colorado).`
-        }
-      ];
-    }
-    return [];
-  })();
-
-  return [...industryWarning, ...locationWarning];
-};
+}) => [
+  ...buildIndustryWarning(industryResolution, industryString),
+  ...buildLocationWarning(locationResolution, locationString)
+];
 
 const buildAnnotationPrompt = ({
   industry,
@@ -212,6 +229,7 @@ const handler = async (rawParams) => {
   const resolutionWarnings = buildResolutionWarnings({
     industryResolution,
     locationResolution,
+    industryString,
     locationString
   });
 
@@ -253,7 +271,7 @@ const handler = async (rawParams) => {
 
   const confidence = deriveConfidence({
     defaultsUsed:
-      industryResolution.match === "fallback" || !locationString,
+      industryResolution.match !== "exact" || !locationString,
     unknownRegion:
       Boolean(locationString) && locationResolution.match === "unknown"
   });

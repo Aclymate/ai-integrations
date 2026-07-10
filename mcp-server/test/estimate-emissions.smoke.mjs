@@ -114,7 +114,7 @@ test("estimate_emissions — Climate Brain outage still returns numeric result (
   });
 });
 
-test("estimate_emissions — no location supplied → default_used warning + Colorado anchor", async () => {
+test("estimate_emissions — no location supplied → default_used warning + Delaware anchor", async () => {
   await withMockedFetch(okAnnotationFetch(), async () => {
     const env = await estimateEmissions({
       industry: "Accounting",
@@ -122,14 +122,33 @@ test("estimate_emissions — no location supplied → default_used warning + Col
     });
     assert.equal(env.error, null);
     assert.equal(env.result.location, null);
-    assert.equal(env.result.resolved_state, "co");
+    assert.equal(env.result.resolved_state, "de");
     assert.ok(
       env.warnings.find(
-        (w) =>
-          w.code === "default_used" && /Colorado/.test(w.message)
+        (w) => w.code === "default_used" && /Delaware/.test(w.message)
       ),
-      "expected default_used warning citing Colorado anchor"
+      "expected default_used warning citing Delaware overshoot fallback"
     );
+  });
+});
+
+test("estimate_emissions — locationless overshoots location-anchored (higher tCO2e)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const noLocation = await estimateEmissions({
+      industry: "Accounting",
+      employees: 10
+    });
+    const inColorado = await estimateEmissions({
+      industry: "Accounting",
+      employees: 10,
+      location: "Colorado"
+    });
+    assert.ok(
+      noLocation.result.annual_tco2e > inColorado.result.annual_tco2e,
+      `locationless (${noLocation.result.annual_tco2e}) should overshoot Colorado (${inColorado.result.annual_tco2e})`
+    );
+    assert.equal(noLocation.result.resolved_state, "de");
+    assert.equal(inColorado.result.resolved_state, "co");
   });
 });
 
@@ -147,7 +166,7 @@ test("estimate_emissions — unrecognized industry falls back to office building
   });
 });
 
-test("estimate_emissions — unresolved location → unknown_region warning + Colorado anchor", async () => {
+test("estimate_emissions — unresolved location → unknown_region warning + Delaware anchor", async () => {
   await withMockedFetch(okAnnotationFetch(), async () => {
     const env = await estimateEmissions({
       industry: "Accounting",
@@ -155,13 +174,17 @@ test("estimate_emissions — unresolved location → unknown_region warning + Co
       location: "Atlantis"
     });
     assert.equal(env.error, null);
-    assert.equal(env.result.resolved_state, "co");
-    assert.ok(env.warnings.find((w) => w.code === "unknown_region"));
+    assert.equal(env.result.resolved_state, "de");
+    assert.ok(
+      env.warnings.find(
+        (w) => w.code === "unknown_region" && /Delaware/.test(w.message)
+      )
+    );
     assert.equal(env.confidence, "low");
   });
 });
 
-test("estimate_emissions — matched industry label surfaced on the result", async () => {
+test("estimate_emissions — matched industry label surfaced on the result (exact match, no warning)", async () => {
   await withMockedFetch(okAnnotationFetch(), async () => {
     const env = await estimateEmissions({
       industry: "accounting",
@@ -169,6 +192,97 @@ test("estimate_emissions — matched industry label surfaced on the result", asy
       location: "Denver, CO"
     });
     assert.equal(env.result.matched_industry_label, "Accounting");
+    assert.equal(
+      env.warnings.find((w) => /matched to Aclymate/.test(w.message ?? "")),
+      undefined,
+      "exact match must NOT emit a substring/PDL match warning"
+    );
+    assert.equal(env.confidence, "high", "exact match + exact state → high confidence");
+  });
+});
+
+test("estimate_emissions — substring-matched industry emits default_used warning + medium confidence (Fix 5)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    // "restaurant" (singular) is not an exact label but is a substring of "Restaurants" (plural)
+    const env = await estimateEmissions({
+      industry: "restaurant",
+      employees: 10,
+      location: "Denver, CO"
+    });
+    assert.equal(env.error, null);
+    assert.equal(
+      env.result.matched_industry_label,
+      "Restaurants",
+      "substring match should surface the matched label"
+    );
+    const warn = env.warnings.find(
+      (w) =>
+        w.code === "default_used" &&
+        /via substring lookup/.test(w.message)
+    );
+    assert.ok(
+      warn,
+      "expected default_used warning citing substring lookup + matched label"
+    );
+    assert.equal(
+      env.confidence,
+      "medium",
+      "non-exact industry match should drop confidence from high to medium"
+    );
+  });
+});
+
+test("estimate_emissions — whitespace-only industry rejected as invalid_input (Fix 1)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await estimateEmissions({
+      industry: "   ",
+      employees: 10,
+      location: "Denver, CO"
+    });
+    assert.ok(env.error, "whitespace-only industry must fail Zod validation");
+    assert.equal(env.error.code, "invalid_input");
+    assert.equal(env.result, null);
+  });
+});
+
+test("estimate_emissions — 'he lives in Denver' does NOT get tagged as Indiana (Fix 2)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await estimateEmissions({
+      industry: "Accounting",
+      employees: 8,
+      location: "he lives in Denver"
+    });
+    assert.notEqual(
+      env.result.resolved_state,
+      "in",
+      "'in' inside prose must not resolve to Indiana"
+    );
+  });
+});
+
+test("estimate_emissions — 'hi there' does NOT get tagged as Hawaii (Fix 2)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await estimateEmissions({
+      industry: "Accounting",
+      employees: 8,
+      location: "hi there we're a business"
+    });
+    assert.notEqual(
+      env.result.resolved_state,
+      "hi",
+      "'hi' inside prose must not resolve to Hawaii"
+    );
+  });
+});
+
+test("estimate_emissions — 'Denver, CO' still resolves to Colorado via comma path (Fix 2 doesn't regress)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await estimateEmissions({
+      industry: "Accounting",
+      employees: 8,
+      location: "Denver, CO"
+    });
+    assert.equal(env.result.resolved_state, "co");
   });
 });
 

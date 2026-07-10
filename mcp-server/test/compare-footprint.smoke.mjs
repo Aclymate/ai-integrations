@@ -179,32 +179,117 @@ test("compare_business_footprint — Climate Brain outage still returns numeric 
   });
 });
 
-test("compare_business_footprint — no location supplied → default_used + Colorado anchor", async () => {
+test("compare_business_footprint — no location supplied → default_used + Delaware anchor", async () => {
   await withMockedFetch(okAnnotationFetch(), async () => {
     const env = await compareFootprint({
       industry: "Accounting",
       employees: 8
     });
     assert.equal(env.result.location, null);
-    assert.equal(env.result.resolved_state, "co");
+    assert.equal(env.result.resolved_state, "de");
     assert.ok(
       env.warnings.find(
-        (w) => w.code === "default_used" && /Colorado/.test(w.message)
+        (w) => w.code === "default_used" && /Delaware/.test(w.message)
       )
     );
   });
 });
 
-test("compare_business_footprint — unresolved location → unknown_region warning + Colorado anchor", async () => {
+test("compare_business_footprint — locationless benchmark overshoots location-anchored (Fix 3)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const noLocation = await compareFootprint({
+      industry: "Accounting",
+      employees: 10
+    });
+    const inColorado = await compareFootprint({
+      industry: "Accounting",
+      employees: 10,
+      location: "Colorado"
+    });
+    assert.ok(
+      noLocation.result.benchmark_annual_tco2e >
+        inColorado.result.benchmark_annual_tco2e,
+      `locationless benchmark (${noLocation.result.benchmark_annual_tco2e}) should overshoot Colorado (${inColorado.result.benchmark_annual_tco2e})`
+    );
+  });
+});
+
+test("compare_business_footprint — unresolved location → unknown_region warning + Delaware anchor", async () => {
   await withMockedFetch(okAnnotationFetch(), async () => {
     const env = await compareFootprint({
       industry: "Accounting",
       employees: 12,
       location: "Atlantis"
     });
-    assert.equal(env.result.resolved_state, "co");
-    assert.ok(env.warnings.find((w) => w.code === "unknown_region"));
+    assert.equal(env.result.resolved_state, "de");
+    assert.ok(
+      env.warnings.find(
+        (w) => w.code === "unknown_region" && /Delaware/.test(w.message)
+      )
+    );
     assert.equal(env.confidence, "low");
+  });
+});
+
+test("compare_business_footprint — exact industry match + exact location → high confidence, no match warning (Fix 5)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Denver, CO"
+    });
+    assert.equal(env.confidence, "high");
+    assert.equal(
+      env.warnings.find((w) => /matched to Aclymate/.test(w.message ?? "")),
+      undefined
+    );
+  });
+});
+
+test("compare_business_footprint — substring-matched industry emits default_used + medium confidence (Fix 5)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    // "restaurant" (singular) is not an exact label but is a substring of "Restaurants" (plural)
+    const env = await compareFootprint({
+      industry: "restaurant",
+      employees: 10,
+      location: "Denver, CO"
+    });
+    assert.equal(env.error, null);
+    assert.equal(env.result.matched_industry_label, "Restaurants");
+    const warn = env.warnings.find(
+      (w) =>
+        w.code === "default_used" &&
+        /via substring lookup/.test(w.message)
+    );
+    assert.ok(
+      warn,
+      "expected default_used warning citing substring lookup + matched label"
+    );
+    assert.equal(env.confidence, "medium");
+  });
+});
+
+test("compare_business_footprint — whitespace-only industry rejected as invalid_input (Fix 1)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "   ",
+      employees: 10,
+      location: "Denver, CO"
+    });
+    assert.ok(env.error);
+    assert.equal(env.error.code, "invalid_input");
+    assert.equal(env.result, null);
+  });
+});
+
+test("compare_business_footprint — 'he lives in Denver' does NOT get tagged as Indiana (Fix 2)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 8,
+      location: "he lives in Denver"
+    });
+    assert.notEqual(env.result.resolved_state, "in");
   });
 });
 
