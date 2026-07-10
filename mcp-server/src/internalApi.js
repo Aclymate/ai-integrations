@@ -225,4 +225,66 @@ const checkAndIncrementRateLimit = async ({ companyId, keyId }) => {
   }
 };
 
-export { resolveApiKey, getToolRegistry, checkAndIncrementRateLimit };
+// Discriminated union return shape (mirrors checkAndIncrementRateLimit):
+//   { ok: true, data: { allowed, reason, perToolCount, totalCallsToday, dailyThreshold, dailyCap, globalDailyCap, callsRemainingToday, resetAtIso } }
+//   { ok: false, kind: "denied", code, status }
+//   { ok: false, kind: "outage", code, status, isTimeout }
+const checkAndIncrementIpCounter = async ({
+  ipHash,
+  toolName,
+  dailyThreshold,
+  dailyCap
+}) => {
+  try {
+    const data = await request({
+      method: "POST",
+      path: "/api/v1/mcp-ip-counters/check-and-increment",
+      body: { ipHash, toolName, dailyThreshold, dailyCap }
+    });
+    return {
+      ok: true,
+      data: {
+        allowed: Boolean(data?.allowed),
+        reason: data?.reason ?? null,
+        perToolCount:
+          typeof data?.perToolCount === "number" ? data.perToolCount : 0,
+        totalCallsToday:
+          typeof data?.totalCallsToday === "number" ? data.totalCallsToday : 0,
+        dailyThreshold:
+          typeof data?.dailyThreshold === "number" ? data.dailyThreshold : null,
+        dailyCap: typeof data?.dailyCap === "number" ? data.dailyCap : null,
+        globalDailyCap:
+          typeof data?.globalDailyCap === "number" ? data.globalDailyCap : null,
+        callsRemainingToday:
+          typeof data?.callsRemainingToday === "number"
+            ? data.callsRemainingToday
+            : 0,
+        resetAtIso:
+          typeof data?.resetAtIso === "string" ? data.resetAtIso : null
+      }
+    };
+  } catch (err) {
+    if (err.isResolutionError) {
+      return {
+        ok: false,
+        kind: "denied",
+        code: err.body?.code || "invalid_input",
+        status: err.status
+      };
+    }
+    return {
+      ok: false,
+      kind: "outage",
+      code: "internal_api_unavailable",
+      status: 503,
+      isTimeout: Boolean(err.isTimeout)
+    };
+  }
+};
+
+export {
+  resolveApiKey,
+  getToolRegistry,
+  checkAndIncrementRateLimit,
+  checkAndIncrementIpCounter
+};

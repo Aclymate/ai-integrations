@@ -21,11 +21,13 @@ import { handler as calcGas } from "./tools/calcs/tier1/calculateGasEmissions.js
 import { handler as calcDiet } from "./tools/calcs/tier1/calculateDietEmissions.js";
 import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js";
 import { authMiddleware } from "./middleware/auth.js";
+import { enforceMeteringForRest } from "./middleware/metering.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
 import {
   enforceRateLimitForRest,
-  applySuccessHintToEnvelope
+  buildRateLimitSuccessHint
 } from "./middleware/rateLimit.js";
+import { applySuccessHintToEnvelope } from "./middleware/upgradeHints.js";
 import {
   buildErrorEnvelope,
   sendJson
@@ -172,6 +174,7 @@ const restRouteHandlers = {
 const handleRestRoute = async (req, res, route) => {
   const chain = withMiddleware(
     authMiddleware,
+    enforceMeteringForRest(route.toolName),
     enforceToolTierForRest(route.toolName),
     enforceRateLimitForRest(route.toolName)
   );
@@ -195,11 +198,15 @@ const handleRestRoute = async (req, res, route) => {
   }
   const result = await route.execute(body);
   const status = result?.error?.http_status ?? 200;
-  const withRateLimitHint =
-    req.rateLimit && !result?.error
-      ? applySuccessHintToEnvelope(result, req.rateLimit.callsRemainingToday)
-      : result;
-  sendJson(res, status, withRateLimitHint);
+  // Anonymous (req.meter) and authenticated (req.rateLimit) nudge zones are
+  // disjoint by construction — both middlewares' shouldSkip predicates are
+  // mutually exclusive on keyId, so at most one of these is ever populated.
+  const hint =
+    req.meter?.hint ??
+    (req.rateLimit ? buildRateLimitSuccessHint(req.rateLimit) : null);
+  const withHint =
+    hint && !result?.error ? applySuccessHintToEnvelope(result, hint) : result;
+  sendJson(res, status, withHint);
 };
 
 // buildServer({auth}) is called PER REQUEST. Each call captures req.auth in a

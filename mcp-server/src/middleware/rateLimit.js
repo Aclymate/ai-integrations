@@ -4,6 +4,17 @@ import {
   sendJson,
   UPGRADE_HINT_URL
 } from "../responseEnvelope.js";
+import {
+  emitStructuredWarning,
+  applySuccessHintToEnvelope as applyHintToEnvelope,
+  applySuccessHintToMcpResponse as applyHintToMcpResponse,
+  buildRateLimitToolResponse
+} from "./upgradeHints.js";
+
+const RATE_LIMIT_HINT_EVENTS = {
+  multiBlock: "rate_limit_hint_skip_multi_block",
+  invalidJson: "rate_limit_hint_skip_invalid_json"
+};
 
 const STATUS_FOR_CODE = {
   rate_limit_exceeded: 429,
@@ -15,10 +26,6 @@ const MESSAGE_FOR_CODE = {
     "Daily rate limit exceeded. Upgrade at aclymate.com/ai.",
   internal_api_unavailable:
     "Aclymate's internal API is temporarily unavailable. Please retry."
-};
-
-const emitStructuredWarning = (payload) => {
-  process.stderr.write(JSON.stringify(payload) + "\n");
 };
 
 const shouldSkip = (auth) => {
@@ -52,67 +59,21 @@ const buildSuccessCountdownHint = (callsRemainingToday) => ({
   calls_remaining_today: callsRemainingToday
 });
 
-const tryParseJson = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+// Thin wrappers preserving this module's original (envelope, callsRemainingToday)
+// signature — upgradeHints.js's generic versions take a pre-built hint object.
+const applySuccessHintToEnvelope = (envelope, callsRemainingToday) =>
+  applyHintToEnvelope(envelope, buildSuccessCountdownHint(callsRemainingToday));
 
-const looksLikeEnvelope = (value) =>
-  value !== null &&
-  typeof value === "object" &&
-  Object.prototype.hasOwnProperty.call(value, "upgrade_hint");
+const applySuccessHintToMcpResponse = (response, callsRemainingToday, toolName) =>
+  applyHintToMcpResponse(
+    response,
+    buildSuccessCountdownHint(callsRemainingToday),
+    toolName,
+    RATE_LIMIT_HINT_EVENTS
+  );
 
-const applySuccessHintToEnvelope = (envelope, callsRemainingToday) => {
-  if (!looksLikeEnvelope(envelope)) {
-    return envelope;
-  }
-  if (envelope.upgrade_hint) {
-    return envelope;
-  }
-  return {
-    ...envelope,
-    upgrade_hint: buildSuccessCountdownHint(callsRemainingToday)
-  };
-};
-
-const applySuccessHintToMcpResponse = (response, callsRemainingToday, toolName) => {
-  const content = response?.content;
-  if (!Array.isArray(content) || content.length !== 1) {
-    if (Array.isArray(content) && content.length > 1) {
-      emitStructuredWarning({
-        event: "rate_limit_hint_skip_multi_block",
-        toolName,
-        blockCount: content.length
-      });
-    }
-    return response;
-  }
-  const [firstBlock] = content;
-  if (firstBlock?.type !== "text" || typeof firstBlock.text !== "string") {
-    return response;
-  }
-  const parsed = tryParseJson(firstBlock.text);
-  if (parsed === null) {
-    emitStructuredWarning({
-      event: "rate_limit_hint_skip_invalid_json",
-      toolName,
-      detail:
-        "handler returned non-JSON text content — either legacy prose tool (expected) or envelope-serialization bug (unexpected)"
-    });
-    return response;
-  }
-  if (!looksLikeEnvelope(parsed)) {
-    return response;
-  }
-  const injected = applySuccessHintToEnvelope(parsed, callsRemainingToday);
-  return {
-    ...response,
-    content: [{ type: "text", text: JSON.stringify(injected) }]
-  };
-};
+const buildRateLimitSuccessHint = (rateLimit) =>
+  buildSuccessCountdownHint(rateLimit.callsRemainingToday);
 
 const buildRateLimitErrorEnvelope = ({ callsRemainingToday }) =>
   buildErrorEnvelope({
@@ -220,11 +181,6 @@ const enforceRateLimitForRest = (toolName) => async (req, res) => {
   return { proceed: false };
 };
 
-const buildRateLimitToolResponse = (envelope) => ({
-  content: [{ type: "text", text: JSON.stringify(envelope) }],
-  isError: true
-});
-
 const withRateLimit = (toolName, handler, options) => {
   if (!options || typeof options.getAuth !== "function") {
     throw new Error(
@@ -268,5 +224,6 @@ export {
   shouldSkip,
   applySuccessHintToEnvelope,
   buildSuccessCountdownHint,
+  buildRateLimitSuccessHint,
   STATUS_FOR_CODE
 };
