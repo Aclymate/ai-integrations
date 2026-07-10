@@ -181,4 +181,48 @@ const getToolRegistry = async () => {
   return data?.tools || [];
 };
 
-export { resolveApiKey, getToolRegistry };
+// Discriminated union return shape (mirrors resolveApiKey):
+//   { ok: true, data: { allowed, callsRemainingToday, dailyLimit, resetAtIso } }
+//   { ok: false, kind: "denied", code, status }
+//   { ok: false, kind: "outage", code, status, isTimeout }
+const checkAndIncrementRateLimit = async ({ companyId, keyId }) => {
+  try {
+    const data = await request({
+      method: "POST",
+      path: "/api/v1/api-keys/check-and-increment-counter",
+      body: { companyId, keyId }
+    });
+    return {
+      ok: true,
+      data: {
+        allowed: Boolean(data?.allowed),
+        callsRemainingToday:
+          typeof data?.callsRemainingToday === "number"
+            ? data.callsRemainingToday
+            : 0,
+        dailyLimit:
+          typeof data?.dailyLimit === "number" ? data.dailyLimit : null,
+        resetAtIso:
+          typeof data?.resetAtIso === "string" ? data.resetAtIso : null
+      }
+    };
+  } catch (err) {
+    if (err.isResolutionError) {
+      return {
+        ok: false,
+        kind: "denied",
+        code: err.body?.code || "invalid_api_key",
+        status: err.status
+      };
+    }
+    return {
+      ok: false,
+      kind: "outage",
+      code: "internal_api_unavailable",
+      status: 503,
+      isTimeout: Boolean(err.isTimeout)
+    };
+  }
+};
+
+export { resolveApiKey, getToolRegistry, checkAndIncrementRateLimit };

@@ -23,6 +23,10 @@ import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js
 import { authMiddleware } from "./middleware/auth.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
 import {
+  enforceRateLimitForRest,
+  applySuccessHintToEnvelope
+} from "./middleware/rateLimit.js";
+import {
   buildErrorEnvelope,
   sendJson
 } from "./responseEnvelope.js";
@@ -168,7 +172,8 @@ const restRouteHandlers = {
 const handleRestRoute = async (req, res, route) => {
   const chain = withMiddleware(
     authMiddleware,
-    enforceToolTierForRest(route.toolName)
+    enforceToolTierForRest(route.toolName),
+    enforceRateLimitForRest(route.toolName)
   );
   const outcome = await chain(req, res);
   if (!outcome?.proceed) {
@@ -190,7 +195,11 @@ const handleRestRoute = async (req, res, route) => {
   }
   const result = await route.execute(body);
   const status = result?.error?.http_status ?? 200;
-  sendJson(res, status, result);
+  const withRateLimitHint =
+    req.rateLimit && !result?.error
+      ? applySuccessHintToEnvelope(result, req.rateLimit.callsRemainingToday)
+      : result;
+  sendJson(res, status, withRateLimitHint);
 };
 
 // buildServer({auth}) is called PER REQUEST. Each call captures req.auth in a
