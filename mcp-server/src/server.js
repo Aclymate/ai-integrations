@@ -20,6 +20,8 @@ import { handler as calcElectricity } from "./tools/calcs/tier1/calculateElectri
 import { handler as calcGas } from "./tools/calcs/tier1/calculateGasEmissions.js";
 import { handler as calcDiet } from "./tools/calcs/tier1/calculateDietEmissions.js";
 import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js";
+// B-Tier1-recommender — 1 tool
+import { handler as recommendReductions } from "./tools/recommender/recommendEmissionsReductions.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { enforceMeteringForRest } from "./middleware/metering.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
@@ -168,6 +170,11 @@ const restRouteHandlers = {
   "/calculate-train-emissions": {
     toolName: "calculate_train_emissions",
     execute: async (body) => calcTrain(body)
+  },
+  // B-Tier1-recommender — 1 REST route (returns the FM §4 envelope directly)
+  "/recommend-emissions-reductions": {
+    toolName: "recommend_emissions_reductions",
+    execute: async (body) => recommendReductions(body)
   }
 };
 

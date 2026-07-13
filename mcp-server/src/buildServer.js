@@ -82,6 +82,12 @@ import {
   inputShape as calcPetShape,
   handler as calcPet
 } from "./tools/calcs/tier1/calculatePetEmissions.js";
+// B-Tier1-recommender — 1 tool
+import {
+  definition as recommendReductionsDef,
+  inputShape as recommendReductionsShape,
+  handler as recommendReductions
+} from "./tools/recommender/recommendEmissionsReductions.js";
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
 import { withRateLimit } from "./middleware/rateLimit.js";
@@ -246,6 +252,14 @@ const buildServer = async ({ auth = null } = {}) => {
     definition: calcTrainDef,
     inputShape: calcTrainShape,
     handler: calcTrain,
+    getAuth
+  });
+
+  // B-Tier1-recommender — 1 tool
+  registerEnvelopeTool(server, {
+    definition: recommendReductionsDef,
+    inputShape: recommendReductionsShape,
+    handler: recommendReductions,
     getAuth
   });
 
