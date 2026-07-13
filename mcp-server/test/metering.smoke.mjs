@@ -424,6 +424,48 @@ describe("Metering runs BEFORE tier-gate", () => {
       restore();
     }
   });
+
+  test("MCP path: nudge-zone anonymous caller on a Tier-3 tool keeps tier-gate's tier_403 hint (metering does NOT clobber it)", async () => {
+    // withMetering wraps withTierGate (outermost) exactly as buildServer.js
+    // composes them. An anonymous caller in the metering nudge zone probing a
+    // Tier-3 tool: tier-gate (inner) denies with a tier_403 hint; metering
+    // (outer) then tries to inject its conversion_nudge — the existing-hint
+    // guard in applySuccessHintToEnvelope must preserve tier_403.
+    const restore = stubFetch(async () =>
+      jsonFetchResponse({
+        allowed: true,
+        reason: null,
+        perToolCount: 5,
+        totalCallsToday: 5,
+        callsRemainingToday: 5,
+        resetAtIso: "2026-07-11T00:00:00.000Z"
+      })
+    );
+    try {
+      const { withTierGate } = await import("../src/middleware/toolTierGate.js");
+      const getAuth = () => buildAuth();
+      let realHandlerCalled = false;
+      const wrapped = withMetering(
+        "audit_a_number",
+        withTierGate(
+          "audit_a_number",
+          async () => {
+            realHandlerCalled = true;
+            return { content: [{ type: "text", text: "should-not-run" }] };
+          },
+          { getAuth }
+        ),
+        { getAuth }
+      );
+      const result = await wrapped({}, {});
+      assert.equal(realHandlerCalled, false);
+      const payload = JSON.parse(result.content[0].text);
+      assert.equal(payload.error.code, "missing_bearer_token");
+      assert.equal(payload.upgrade_hint.trigger, "tier_403");
+    } finally {
+      restore();
+    }
+  });
 });
 
 describe("withMetering — MCP handler wrapping", () => {
