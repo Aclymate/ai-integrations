@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import defaultCalcs from "@aclymatepackages/calcs/recurring/defaultCalcs.js";
 import { handler as compareFootprint } from "../src/tools/compareFootprint.js";
 
 const CLIMATE_BRAIN_URL =
@@ -23,56 +24,272 @@ const withMockedFetch = (mockFn, run) => {
     });
 };
 
-test("compare_business_footprint — without totalTonsCo2e returns benchmark envelope + CLIMATE_BRAIN_BENCHMARK warning", async () => {
-  const mockFetch = async (url) => {
+const okAnnotationFetch = (text = "Top performers procure renewables...") =>
+  async (url) => {
     if (url === CLIMATE_BRAIN_URL) {
-      return jsonResponse({
-        response: "A 25-person retail store typically ranges 40-80 tCO2e/year..."
-      });
+      return jsonResponse({ response: text });
     }
     throw new Error(`unexpected fetch to ${url}`);
   };
-  await withMockedFetch(mockFetch, async () => {
+
+test("compare_business_footprint — benchmark tCO2e comes from @aclymatepackages/calcs (parity with buildDefaultEmissionsObj)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
     const env = await compareFootprint({
-      industry: "retail store",
-      employees: 25
+      industry: "Accounting",
+      employees: 25,
+      location: "Denver, CO"
     });
     assert.equal(env.error, null);
-    assert.equal(env.confidence, "low");
-    assert.equal(env.result.method, "climate_brain_benchmark");
-    assert.equal(env.result.industry, "retail store");
-    assert.equal(env.result.employees, 25);
-    assert.equal(env.result.totalTonsCo2e, null);
-    assert.ok(env.warnings.find((w) => w.code === "climate_brain_benchmark"));
-    assert.equal(env.factor_snapshot, null);
+    assert.equal(env.result.method, "calcs_default_emissions_benchmark");
+
+    const monthly = defaultCalcs.buildDefaultEmissionsObj({
+      employeeCount: 25,
+      isRemote: false,
+      state: "co",
+      industry: { label: "Accounting", buildingsSlug: "office", naics: 541219 },
+      country: "us"
+    });
+    const expected = monthly.totalMonthlyTons * 12;
+
+    assert.ok(
+      Math.abs(env.result.benchmark_annual_tco2e - expected) < 1e-9,
+      `benchmark ${env.result.benchmark_annual_tco2e} != calcs-derived ${expected}`
+    );
+    assert.ok(env.result.benchmark_annual_tco2e > 0);
   });
 });
 
-test("compare_business_footprint — with totalTonsCo2e returns envelope preserving the value", async () => {
-  const mockFetch = async () =>
-    jsonResponse({ response: "Above peers by ~15%..." });
-  await withMockedFetch(mockFetch, async () => {
+test("compare_business_footprint — factor_snapshot pins @aclymatepackages/calcs", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
     const env = await compareFootprint({
       industry: "consulting firm",
-      employees: 50,
-      totalTonsCo2e: 120
+      employees: 10,
+      location: "Colorado"
     });
-    assert.equal(env.error, null);
-    assert.equal(env.result.totalTonsCo2e, 120);
-    assert.ok(env.warnings.find((w) => w.code === "climate_brain_benchmark"));
+    assert.equal(env.factor_snapshot.package, "@aclymatepackages/calcs");
+    assert.ok(env.factor_snapshot.version);
+    assert.ok(env.sources.length > 0);
+    assert.equal(env.attribution.name, "Aclymate");
   });
 });
 
-test("compare_business_footprint — Climate Brain outage returns CLIMATE_BRAIN_UNAVAILABLE error", async () => {
+test("compare_business_footprint — no totalTonsCo2e supplied → pct_vs_benchmark null, posture null", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "retail store",
+      employees: 8,
+      location: "Colorado"
+    });
+    assert.equal(env.result.totalTonsCo2e, null);
+    assert.equal(env.result.pct_vs_benchmark, null);
+    assert.equal(env.result.posture, null);
+  });
+});
+
+test("compare_business_footprint — actual > 15% above benchmark → posture=above_peers", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const preview = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Colorado"
+    });
+    const inflated = preview.result.benchmark_annual_tco2e * 1.5;
+
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Colorado",
+      totalTonsCo2e: inflated
+    });
+    assert.equal(env.result.posture, "above_peers");
+    assert.ok(env.result.pct_vs_benchmark > 15);
+  });
+});
+
+test("compare_business_footprint — actual > 15% below benchmark → posture=below_peers", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const preview = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Colorado"
+    });
+    const deflated = preview.result.benchmark_annual_tco2e * 0.5;
+
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Colorado",
+      totalTonsCo2e: deflated
+    });
+    assert.equal(env.result.posture, "below_peers");
+    assert.ok(env.result.pct_vs_benchmark < -15);
+  });
+});
+
+test("compare_business_footprint — actual within ±15% of benchmark → posture=in_line", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const preview = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Colorado"
+    });
+    const nearBenchmark = preview.result.benchmark_annual_tco2e * 1.05;
+
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Colorado",
+      totalTonsCo2e: nearBenchmark
+    });
+    assert.equal(env.result.posture, "in_line");
+  });
+});
+
+test("compare_business_footprint — Climate Brain prose emitted as annotation with climate_brain_authored warning", async () => {
+  const proseText = "Top performers procure 100% renewables and...";
+  await withMockedFetch(okAnnotationFetch(proseText), async () => {
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Colorado"
+    });
+    assert.equal(env.result.annotation, proseText);
+    assert.ok(
+      env.warnings.find((w) => w.code === "climate_brain_authored"),
+      "expected climate_brain_authored warning on annotation prose"
+    );
+  });
+});
+
+test("compare_business_footprint — Climate Brain outage still returns numeric benchmark (no more 503)", async () => {
   const mockFetch = async () => jsonResponse({ error: "down" }, 503);
   await withMockedFetch(mockFetch, async () => {
     const env = await compareFootprint({
       industry: "law firm",
-      employees: 15
+      employees: 15,
+      location: "Colorado"
+    });
+    assert.equal(env.error, null, "outage must NOT fail the numeric surface");
+    assert.ok(env.result.benchmark_annual_tco2e > 0);
+    assert.equal(env.result.annotation, null);
+    assert.ok(
+      env.warnings.find((w) => w.code === "climate_brain_fallback"),
+      "expected climate_brain_fallback warning when annotation is unavailable"
+    );
+  });
+});
+
+test("compare_business_footprint — no location supplied → default_used + Delaware anchor", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 8
+    });
+    assert.equal(env.result.location, null);
+    assert.equal(env.result.resolved_state, "de");
+    assert.ok(
+      env.warnings.find(
+        (w) => w.code === "default_used" && /Delaware/.test(w.message)
+      )
+    );
+  });
+});
+
+test("compare_business_footprint — locationless benchmark overshoots location-anchored (Fix 3)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const noLocation = await compareFootprint({
+      industry: "Accounting",
+      employees: 10
+    });
+    const inColorado = await compareFootprint({
+      industry: "Accounting",
+      employees: 10,
+      location: "Colorado"
+    });
+    assert.ok(
+      noLocation.result.benchmark_annual_tco2e >
+        inColorado.result.benchmark_annual_tco2e,
+      `locationless benchmark (${noLocation.result.benchmark_annual_tco2e}) should overshoot Colorado (${inColorado.result.benchmark_annual_tco2e})`
+    );
+  });
+});
+
+test("compare_business_footprint — unresolved location → unknown_region warning + Delaware anchor", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 12,
+      location: "Atlantis"
+    });
+    assert.equal(env.result.resolved_state, "de");
+    assert.ok(
+      env.warnings.find(
+        (w) => w.code === "unknown_region" && /Delaware/.test(w.message)
+      )
+    );
+    assert.equal(env.confidence, "low");
+  });
+});
+
+test("compare_business_footprint — exact industry match + exact location → high confidence, no match warning (Fix 5)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 25,
+      location: "Denver, CO"
+    });
+    assert.equal(env.confidence, "high");
+    assert.equal(
+      env.warnings.find((w) => /matched to Aclymate/.test(w.message ?? "")),
+      undefined
+    );
+  });
+});
+
+test("compare_business_footprint — substring-matched industry emits default_used + medium confidence (Fix 5)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    // "restaurant" (singular) is not an exact label but is a substring of "Restaurants" (plural)
+    const env = await compareFootprint({
+      industry: "restaurant",
+      employees: 10,
+      location: "Denver, CO"
+    });
+    assert.equal(env.error, null);
+    assert.equal(env.result.matched_industry_label, "Restaurants");
+    const warn = env.warnings.find(
+      (w) =>
+        w.code === "default_used" &&
+        /via substring lookup/.test(w.message)
+    );
+    assert.ok(
+      warn,
+      "expected default_used warning citing substring lookup + matched label"
+    );
+    assert.equal(env.confidence, "medium");
+  });
+});
+
+test("compare_business_footprint — whitespace-only industry rejected as invalid_input (Fix 1)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "   ",
+      employees: 10,
+      location: "Denver, CO"
     });
     assert.ok(env.error);
-    assert.equal(env.error.code, "climate_brain_unavailable");
-    assert.equal(env.error.http_status, 503);
+    assert.equal(env.error.code, "invalid_input");
+    assert.equal(env.result, null);
+  });
+});
+
+test("compare_business_footprint — 'he lives in Denver' does NOT get tagged as Indiana (Fix 2)", async () => {
+  await withMockedFetch(okAnnotationFetch(), async () => {
+    const env = await compareFootprint({
+      industry: "Accounting",
+      employees: 8,
+      location: "he lives in Denver"
+    });
+    assert.notEqual(env.result.resolved_state, "in");
   });
 });
 
