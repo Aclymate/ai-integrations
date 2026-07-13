@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { resolveApiKey } from "../internalApi.js";
 import {
   buildAnonymousAuth,
@@ -12,6 +13,8 @@ import {
 
 const BEARER_HEADER_PREFIX = "Bearer ";
 const SCOUT_HEADER = "x-aclymate-scout-auth";
+const METERING_BYPASS_HEADER = "x-aclymate-metering-bypass";
+const MIN_METERING_BYPASS_SECRET_LENGTH = 16;
 
 const STATUS_FOR_CODE = {
   invalid_api_key_format: 401,
@@ -41,6 +44,44 @@ const extractBearerToken = (req) => {
 
 const emitStructuredWarning = (payload) => {
   process.stderr.write(JSON.stringify(payload) + "\n");
+};
+
+// Empty-secret guard: if MCP_INTERNAL_METERING_BYPASS_SECRET is absent, empty, or
+// shorter than 16 chars, bypass is disabled unconditionally — no header value can
+// match. Closes the universal-bypass hole a misconfigured Doppler entry would
+// otherwise open (a bare crypto.timingSafeEqual("", "") returns true).
+const isMeteringBypassSecretConfigured = () => {
+  const secret = process.env.MCP_INTERNAL_METERING_BYPASS_SECRET || "";
+  return secret.length >= MIN_METERING_BYPASS_SECRET_LENGTH;
+};
+
+const secretsMatch = (provided, expected) => {
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+  if (providedBuf.length !== expectedBuf.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(providedBuf, expectedBuf);
+};
+
+const resolveMeteringBypass = (req) => {
+  const header = req.headers?.[METERING_BYPASS_HEADER];
+  if (typeof header !== "string" || !header.length) {
+    return false;
+  }
+  if (!isMeteringBypassSecretConfigured()) {
+    return false;
+  }
+  const expected = process.env.MCP_INTERNAL_METERING_BYPASS_SECRET;
+  if (secretsMatch(header, expected)) {
+    emitStructuredWarning({
+      event: "mcp_ip_meter_bypass_header_valid",
+      level: "info"
+    });
+    return true;
+  }
+  emitStructuredWarning({ event: "mcp_ip_meter_bypass_header_invalid" });
+  return false;
 };
 
 const denyResponse = (res, code) => {
@@ -80,7 +121,9 @@ const authMiddleware = async (req, res) => {
 
   const token = extractBearerToken(req);
   if (!token) {
-    req.auth = buildAnonymousAuth(req);
+    req.auth = buildAnonymousAuth(req, {
+      meteringBypass: resolveMeteringBypass(req)
+    });
     return { proceed: true };
   }
 

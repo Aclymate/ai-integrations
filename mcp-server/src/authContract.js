@@ -11,7 +11,8 @@ const AUTH_FIELDS = Object.freeze([
   "testMode",
   "rateLimit",
   "ipHash",
-  "pendingScoutAuth"
+  "pendingScoutAuth",
+  "meteringBypass"
 ]);
 
 const TIERS = Object.freeze(["tier-1", "tier-2", "tier-3"]);
@@ -36,14 +37,15 @@ const extractClientIp = (req) => {
 const buildIpHash = (req) =>
   sha256Hex(`${getIpHashSalt()}::${extractClientIp(req)}`);
 
-const buildAnonymousAuth = (req) => ({
+const buildAnonymousAuth = (req, { meteringBypass = false } = {}) => ({
   tier: "tier-1",
   accountId: null,
   keyId: null,
   testMode: false,
   rateLimit: null,
   ipHash: buildIpHash(req),
-  pendingScoutAuth: false
+  pendingScoutAuth: false,
+  meteringBypass
 });
 
 const buildAuthenticatedAuth = (req, resolved) => ({
@@ -54,7 +56,8 @@ const buildAuthenticatedAuth = (req, resolved) => ({
   rateLimit:
     typeof resolved.rateLimit === "number" ? resolved.rateLimit : null,
   ipHash: buildIpHash(req),
-  pendingScoutAuth: false
+  pendingScoutAuth: false,
+  meteringBypass: false
 });
 
 const buildScoutPlaceholderAuth = (req) => ({

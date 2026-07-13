@@ -85,6 +85,7 @@ import {
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
 import { withRateLimit } from "./middleware/rateLimit.js";
+import { withMetering } from "./middleware/metering.js";
 
 const envelopeToContent = (envelope) => ({
   content: [{ type: "text", text: JSON.stringify(envelope) }],
@@ -97,11 +98,15 @@ const registerEnvelopeTool = (server, { definition, inputShape, handler, getAuth
     definition.description,
     inputShape,
     { title: definition.title, readOnlyHint: true },
-    withTierGate(
+    withMetering(
       definition.name,
-      withRateLimit(
+      withTierGate(
         definition.name,
-        async (params) => envelopeToContent(await handler(params)),
+        withRateLimit(
+          definition.name,
+          async (params) => envelopeToContent(await handler(params)),
+          { getAuth }
+        ),
         { getAuth }
       ),
       { getAuth }
@@ -137,7 +142,8 @@ const buildServer = async ({ auth = null } = {}) => {
       testMode: false,
       rateLimit: null,
       ipHash: null,
-      pendingScoutAuth: false
+      pendingScoutAuth: false,
+      meteringBypass: false
     };
   const server = new McpServer({ name: "aclymate", version: "0.1.0" });
 
