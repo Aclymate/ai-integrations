@@ -114,36 +114,37 @@ const buildPrompt = ({
   return `${grounding}\n\n${context}\n\n${schemaDirective}`;
 };
 
-const buildIndustryWarning = (industryResolution, industryString) => {
+const industryDefaultReason = (industryResolution, industryString) => {
   if (industryResolution.match === "exact") {
-    return [];
+    return null;
   }
   if (industryResolution.match === "fallback") {
-    return [
-      {
-        code: WARNING_CODES.DEFAULT_USED,
-        message: `Industry '${industryString}' did not match any entry in Aclymate's industries list — recommendations use the office / professional-services fallback.`
-      }
-    ];
+    return `Industry '${industryString}' did not match any entry in Aclymate's industries list — recommendations use the office / professional-services fallback.`;
   }
-  return [
-    {
-      code: WARNING_CODES.DEFAULT_USED,
-      message: `Industry '${industryString}' matched to Aclymate's '${industryResolution.industry.label}' via ${industryResolution.match} lookup — verify this is the intended industry.`
-    }
-  ];
+  return `Industry '${industryString}' matched to Aclymate's '${industryResolution.industry.label}' via ${industryResolution.match} lookup — verify this is the intended industry.`;
 };
 
-const buildLargeOrgWarning = (isLargeOrg) => {
-  if (!isLargeOrg) {
+const largeOrgReason = (isLargeOrg) =>
+  isLargeOrg
+    ? `Employee count exceeds ${LARGE_EMPLOYEE_THRESHOLD} — recommendations are SMB-calibrated and should be treated as directional at this scale.`
+    : null;
+
+// A single default_used warning carries every reason a default was applied
+// (non-exact industry match and/or SMB-calibration for large orgs) so partner
+// UIs never render two chips with the same code.
+const buildDefaultUsedWarning = (
+  industryResolution,
+  industryString,
+  isLargeOrg
+) => {
+  const reasons = [
+    industryDefaultReason(industryResolution, industryString),
+    largeOrgReason(isLargeOrg)
+  ].filter(Boolean);
+  if (!reasons.length) {
     return [];
   }
-  return [
-    {
-      code: WARNING_CODES.DEFAULT_USED,
-      message: `Employee count exceeds ${LARGE_EMPLOYEE_THRESHOLD} — recommendations are SMB-calibrated and should be treated as directional at this scale.`
-    }
-  ];
+  return [{ code: WARNING_CODES.DEFAULT_USED, message: reasons.join(" ") }];
 };
 
 const CLIMATE_BRAIN_AUTHORED_WARNING = {
@@ -170,8 +171,8 @@ const deriveConfidence = ({ match, isLargeOrg }) => {
 
 const stripCodeFences = (text) =>
   text
-    .replace(/^```(?:json)?\n?/, "")
-    .replace(/\n?```$/, "")
+    .replace(/^\s*```[a-zA-Z]*\r?\n?/, "")
+    .replace(/\r?\n?```\s*$/, "")
     .trim();
 
 const tryParse = (text) => {
@@ -237,10 +238,11 @@ const handler = async (rawParams) => {
     });
   }
 
-  const resolutionWarnings = [
-    ...buildIndustryWarning(industryResolution, industryString),
-    ...buildLargeOrgWarning(isLargeOrg)
-  ];
+  const resolutionWarnings = buildDefaultUsedWarning(
+    industryResolution,
+    industryString,
+    isLargeOrg
+  );
 
   const recommendations = parseRecommendations(response);
 

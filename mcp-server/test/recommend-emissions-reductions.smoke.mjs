@@ -216,6 +216,35 @@ test("recommend_emissions_reductions — markdown-fenced JSON recovered and pars
   });
 });
 
+test("recommend_emissions_reductions — uppercase JSON code fence recovered and parsed", async () => {
+  const fenced = "```JSON\r\n" + JSON.stringify(validRecommendations(3)) + "\r\n```";
+  const mockFetch = climateBrainReturning(fenced);
+  await withMockedFetch(mockFetch, async () => {
+    const env = await recommendReductions({
+      industry: "Restaurants",
+      employees: 20
+    });
+    assert.equal(env.error, null);
+    assert.ok(Array.isArray(env.result.recommendations));
+    assert.equal(env.result.recommendations.length, 3);
+  });
+});
+
+test("recommend_emissions_reductions — fallback industry + large org emits a single combined default_used warning", async () => {
+  const mockFetch = climateBrainReturning(JSON.stringify(validRecommendations(3)));
+  await withMockedFetch(mockFetch, async () => {
+    const env = await recommendReductions({
+      industry: "SaaSyPantsRunners",
+      employees: 50000
+    });
+    assert.equal(env.error, null);
+    const defaultUsed = env.warnings.filter((w) => w.code === "default_used");
+    assert.equal(defaultUsed.length, 1);
+    assert.ok(defaultUsed[0].message.includes("did not match"));
+    assert.ok(defaultUsed[0].message.includes("SMB-calibrated"));
+  });
+});
+
 test("recommend_emissions_reductions — out-of-range array count treated as parse failure", async () => {
   const mockFetch = climateBrainReturning(
     JSON.stringify(validRecommendations(8))
