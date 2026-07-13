@@ -39,7 +39,8 @@ const REST_PATH_TO_TOOL_NAME = {
   "/calculate-electricity-emissions": "calculate_electricity_emissions",
   "/calculate-gas-emissions": "calculate_gas_emissions",
   "/calculate-diet-emissions": "calculate_diet_emissions",
-  "/calculate-pet-emissions": "calculate_pet_emissions"
+  "/calculate-pet-emissions": "calculate_pet_emissions",
+  "/recommend-emissions-reductions": "recommend_emissions_reductions"
 };
 
 const collectToolFiles = async (dir) => {

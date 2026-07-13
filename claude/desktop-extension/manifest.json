@@ -111,6 +111,11 @@
       "name": "calculate_pet_emissions",
       "title": "Calculate Pet Emissions",
       "description": "Calculate monthly and annual tCO2e for pets — dogs, cats, and large dogs (counted at 2× the dog factor)"
+    },
+    {
+      "name": "recommend_emissions_reductions",
+      "title": "Recommend Emissions Reductions",
+      "description": "Get 3-6 opinionated, industry-specific carbon-reduction levers for a business — each with a targeted scope, impact and effort rating, and a concrete first step, as structured envelope fields"
     }
   ],
   "compatibility": {

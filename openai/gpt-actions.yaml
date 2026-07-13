@@ -480,6 +480,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/ToolEnvelope"
 
+  /recommend-emissions-reductions:
+    post:
+      operationId: recommendEmissionsReductions
+      summary: Recommend emissions reductions
+      description: Returns 3-6 opinionated, industry-specific carbon-reduction levers for a business (title, description, targeted scope, impact, effort, first step). Focuses on operational reductions; does not cover offsets, certifications, or framework work.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [industry, employees]
+              properties:
+                industry:
+                  type: string
+                  description: The business industry or type (e.g. 'restaurant', 'SaaS company', 'law firm')
+                employees:
+                  type: number
+                  description: Number of employees
+                scopeFocus:
+                  type: string
+                  enum: ["1", "2", "3", "all"]
+                  description: Which GHG Protocol scope the recommendations should focus on. Optional — defaults to 'all'.
+                additionalContext:
+                  type: string
+                  description: Any additional context about the business (e.g. 'operates 3 locations', 'mostly remote'). Optional.
+      responses:
+        "200":
+          description: Reduction-recommendations envelope with a structured recommendations array
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolEnvelope"
+
 components:
   schemas:
     ToolEnvelope:
