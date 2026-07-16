@@ -326,10 +326,55 @@ const recordStoredResult = async ({
   }
 };
 
+// Discriminated union return shape (mirrors recordStoredResult):
+//   { ok: true, data: { entryId } }
+//   { ok: false, kind: "denied", code, status }
+//   { ok: false, kind: "outage", code, status, isTimeout }
+const recordAuditLogEntry = async ({
+  companyId,
+  keyId,
+  tool,
+  inputs,
+  resultHash,
+  sourceAgent,
+  latencyMs
+}) => {
+  try {
+    const data = await request({
+      method: "POST",
+      path: "/api/v1/mcp-audit-log/record",
+      body: { companyId, keyId, tool, inputs, resultHash, sourceAgent, latencyMs }
+    });
+    return {
+      ok: true,
+      data: {
+        entryId: data?.entryId || null
+      }
+    };
+  } catch (err) {
+    if (err.isResolutionError) {
+      return {
+        ok: false,
+        kind: "denied",
+        code: err.body?.code || "invalid_input",
+        status: err.status
+      };
+    }
+    return {
+      ok: false,
+      kind: "outage",
+      code: "internal_api_unavailable",
+      status: 503,
+      isTimeout: Boolean(err.isTimeout)
+    };
+  }
+};
+
 export {
   resolveApiKey,
   getToolRegistry,
   checkAndIncrementRateLimit,
   checkAndIncrementIpCounter,
-  recordStoredResult
+  recordStoredResult,
+  recordAuditLogEntry
 };

@@ -28,6 +28,7 @@ import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js
 import { handler as recommendReductions } from "./tools/recommender/recommendEmissionsReductions.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { detectSourceAgent } from "./middleware/sourceAgent.js";
+import { runAudited } from "./middleware/audit.js";
 import { enforceMeteringForRest } from "./middleware/metering.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
 import {
@@ -208,7 +209,15 @@ const handleRestRoute = async (req, res, route) => {
     sendInvalidJson(res);
     return;
   }
-  const result = await route.execute(body);
+  // Audit the REST surface too — a thrown handler records an error-marker and
+  // re-throws (see runAudited). Tier-3 REST tools inherit auditing for free.
+  const result = await runAudited({
+    run: () => route.execute(body),
+    auth: req.auth,
+    sourceAgent: detectSourceAgent(req, req.auth),
+    toolName: route.toolName,
+    inputs: body
+  });
   const status = result?.error?.http_status ?? 200;
   // Anonymous (req.meter) and authenticated (req.rateLimit) nudge zones are
   // disjoint by construction — both middlewares' shouldSkip predicates are
