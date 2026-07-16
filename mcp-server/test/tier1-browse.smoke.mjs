@@ -160,6 +160,30 @@ test("search_factors — zero results returns empty list + NO_SEARCH_MATCHES", a
   assert.ok(env.warnings.find((w) => w.code === "no_search_matches"));
 });
 
+test("search_factors — exact-match miss falls back to fuzzy match with confidence:medium + FUZZY_MATCH warning", async () => {
+  // "R-410A refrigerant" (hyphenated) has no exact alias/search_term match — the catalog
+  // stores "R410A refrigerant" (no hyphen) — but the fuzzy fallback should still find it.
+  const env = await searchFactors({ query: "R-410A refrigerant" });
+  assertSuccessEnvelope(env);
+  assert.ok(env.result.factors.length > 0, "expected a fuzzy match, not zero results");
+  assert.equal(env.confidence, "medium");
+  assert.ok(
+    env.warnings.find((w) => w.code === "fuzzy_match"),
+    "expected a fuzzy_match warning",
+  );
+});
+
+test("search_factors — genuine nonsense query still returns zero results even with fuzzy fallback", async () => {
+  const env = await searchFactors({ query: "definitely_not_a_real_factor_zzzz" });
+  assertSuccessEnvelope(env);
+  assert.deepEqual(env.result, { factors: [], count: 0 });
+  assert.ok(env.warnings.find((w) => w.code === "no_search_matches"));
+  assert.ok(
+    !env.warnings.find((w) => w.code === "fuzzy_match"),
+    "fuzzy fallback should not fire a fuzzy_match warning when it also found nothing",
+  );
+});
+
 test("search_factors — unknown factor_type filter returns empty + UNKNOWN_FACTOR_TYPE", async () => {
   const env = await searchFactors({
     query: "anything",
