@@ -43,12 +43,22 @@ const REST_PATH_TO_TOOL_NAME = {
   "/recommend-emissions-reductions": "recommend_emissions_reductions"
 };
 
+// Tier-2/Tier-3 tools are bearer-token gated — they have no business on the
+// public/unauthenticated GPT-Actions or Claude Desktop Extension surfaces
+// until those integrations grow an API-key auth flow (A1/A2/A3 scope, not
+// B-Tier2-tools/B-Tier3-*). Skip their directories entirely rather than
+// listing non-functional entries on either public surface.
+const AUTH_GATED_TOOL_DIRS = new Set(["tier2", "tier3"]);
+
 const collectToolFiles = async (dir) => {
   const entries = await readdir(dir, { withFileTypes: true });
   const children = await Promise.all(
     entries.map(async (entry) => {
       const full = resolve(dir, entry.name);
       if (entry.isDirectory()) {
+        if (AUTH_GATED_TOOL_DIRS.has(entry.name)) {
+          return [];
+        }
         return collectToolFiles(full);
       }
       if (entry.name.endsWith(".js")) {
