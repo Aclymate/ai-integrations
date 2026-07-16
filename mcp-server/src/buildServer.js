@@ -88,62 +88,17 @@ import {
   inputShape as recommendReductionsShape,
   handler as recommendReductions
 } from "./tools/recommender/recommendEmissionsReductions.js";
-// B-Tier2-tools — 8 tools (Tier-2 calc-based + stored-result layer)
-import {
-  definition as classifyVendorDef,
-  inputShape as classifyVendorShape,
-  handler as classifyVendor
-} from "./tools/tier2/classifyVendorByIndustry.js";
-import {
-  definition as calcRefrigerantDef,
-  inputShape as calcRefrigerantShape,
-  handler as calcRefrigerant
-} from "./tools/tier2/calculateRefrigerantEmissions.js";
-import {
-  definition as calcSteamDef,
-  inputShape as calcSteamShape,
-  handler as calcSteam
-} from "./tools/tier2/calculateSteamEmissions.js";
-import {
-  definition as calcWaterDef,
-  inputShape as calcWaterShape,
-  handler as calcWater
-} from "./tools/tier2/calculateWaterEmissions.js";
-import {
-  definition as calcVehicleDef,
-  inputShape as calcVehicleShape,
-  handler as calcVehicle
-} from "./tools/tier2/calculateVehicleEmissions.js";
-import {
-  definition as calcShippingDef,
-  inputShape as calcShippingShape,
-  handler as calcShipping
-} from "./tools/tier2/calculateShippingEmissions.js";
-import {
-  definition as calcCommuteDef,
-  inputShape as calcCommuteShape,
-  handler as calcCommute
-} from "./tools/tier2/calculateCommuteEmissions.js";
-import {
-  definition as calcOfficeUtilityDef,
-  inputShape as calcOfficeUtilityShape,
-  handler as calcOfficeUtility
-} from "./tools/tier2/calculateOfficeUtilityEmissions.js";
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
 import { withRateLimit } from "./middleware/rateLimit.js";
 import { withMetering } from "./middleware/metering.js";
-import { withStoredResults } from "./middleware/storedResults.js";
 
 const envelopeToContent = (envelope) => ({
   content: [{ type: "text", text: JSON.stringify(envelope) }],
   ...(envelope.error ? { isError: true } : {})
 });
 
-const registerEnvelopeTool = (
-  server,
-  { definition, inputShape, handler, getAuth, getReq }
-) => {
+const registerEnvelopeTool = (server, { definition, inputShape, handler, getAuth }) => {
   server.tool(
     definition.name,
     definition.description,
@@ -155,13 +110,7 @@ const registerEnvelopeTool = (
         definition.name,
         withRateLimit(
           definition.name,
-          async (params) =>
-            envelopeToContent(
-              await withStoredResults(definition.name, handler, {
-                getAuth,
-                getReq
-              })(params)
-            ),
+          async (params) => envelopeToContent(await handler(params)),
           { getAuth }
         ),
         { getAuth }
@@ -183,13 +132,12 @@ const ensureRegistryLoaded = () => {
   return registryLoadPromise;
 };
 
-// Called PER HTTP REQUEST from server.js so `getAuth`/`getReq` close over
-// that request's `req.auth`/`req`. Do NOT hoist to module scope — see the
-// comment on handleMcpRoute in server.js for the failure mode. `withTierGate`
+// Called PER HTTP REQUEST from server.js so `getAuth` closes over that
+// request's `req.auth`. Do NOT hoist to module scope — see the comment
+// on handleMcpRoute in server.js for the failure mode. `withTierGate`
 // enforces `getAuth` at registration time; if you add a new tool below,
-// you MUST pass `{ getAuth, getReq }` — the HOC throws otherwise for getAuth
-// (getReq is optional, only consumed by withStoredResults).
-const buildServer = async ({ auth = null, req = null } = {}) => {
+// you MUST pass `{ getAuth }` — the HOC throws otherwise, on purpose.
+const buildServer = async ({ auth = null } = {}) => {
   await ensureRegistryLoaded();
 
   const getAuth = () =>
@@ -203,9 +151,6 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
       pendingScoutAuth: false,
       meteringBypass: false
     };
-  // Only consumed by withStoredResults's detectSourceAgent — defaults to null
-  // (source_agent "unknown") rather than throwing, unlike getAuth.
-  const getReq = () => req;
   const server = new McpServer({ name: "aclymate", version: "0.1.0" });
 
   // Phase A — 4 tools (envelope-migrated)
@@ -213,29 +158,25 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
     definition: compareDef,
     inputShape: compareShape,
     handler: compareFootprint,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: estimateDef,
     inputShape: estimateShape,
     handler: estimateEmissions,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: explainScopeDef,
     inputShape: explainScopeShape,
     handler: explainScope,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: emissionFactorDef,
     inputShape: emissionFactorShape,
     handler: getEmissionFactor,
-    getAuth,
-    getReq
+    getAuth
   });
 
   // B-Tier1-browse — 5 catalog browse tools
@@ -243,36 +184,31 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
     definition: findFactorDef,
     inputShape: findFactorShape,
     handler: findFactor,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: listFactorKeyValuesDef,
     inputShape: listFactorKeyValuesShape,
     handler: listFactorKeyValues,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: listFactorTypesDef,
     inputShape: listFactorTypesShape,
     handler: listFactorTypes,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: lookupFactorByIdDef,
     inputShape: lookupFactorByIdShape,
     handler: lookupFactorById,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: searchFactorsDef,
     inputShape: searchFactorsShape,
     handler: searchFactors,
-    getAuth,
-    getReq
+    getAuth
   });
 
   // B-Tier1-calcs — 7 calc tools
@@ -280,50 +216,43 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
     definition: calcDietDef,
     inputShape: calcDietShape,
     handler: calcDiet,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: calcElectricityDef,
     inputShape: calcElectricityShape,
     handler: calcElectricity,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: calcFlightDef,
     inputShape: calcFlightShape,
     handler: calcFlight,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: calcGasDef,
     inputShape: calcGasShape,
     handler: calcGas,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: calcOtherTransportDef,
     inputShape: calcOtherTransportShape,
     handler: calcOtherTransport,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: calcPetDef,
     inputShape: calcPetShape,
     handler: calcPet,
-    getAuth,
-    getReq
+    getAuth
   });
   registerEnvelopeTool(server, {
     definition: calcTrainDef,
     inputShape: calcTrainShape,
     handler: calcTrain,
-    getAuth,
-    getReq
+    getAuth
   });
 
   // B-Tier1-recommender — 1 tool
@@ -331,66 +260,7 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
     definition: recommendReductionsDef,
     inputShape: recommendReductionsShape,
     handler: recommendReductions,
-    getAuth,
-    getReq
-  });
-
-  // B-Tier2-tools — 8 tools (Tier-2 calc-based + stored-result layer)
-  registerEnvelopeTool(server, {
-    definition: classifyVendorDef,
-    inputShape: classifyVendorShape,
-    handler: classifyVendor,
-    getAuth,
-    getReq
-  });
-  registerEnvelopeTool(server, {
-    definition: calcRefrigerantDef,
-    inputShape: calcRefrigerantShape,
-    handler: calcRefrigerant,
-    getAuth,
-    getReq
-  });
-  registerEnvelopeTool(server, {
-    definition: calcSteamDef,
-    inputShape: calcSteamShape,
-    handler: calcSteam,
-    getAuth,
-    getReq
-  });
-  registerEnvelopeTool(server, {
-    definition: calcWaterDef,
-    inputShape: calcWaterShape,
-    handler: calcWater,
-    getAuth,
-    getReq
-  });
-  registerEnvelopeTool(server, {
-    definition: calcVehicleDef,
-    inputShape: calcVehicleShape,
-    handler: calcVehicle,
-    getAuth,
-    getReq
-  });
-  registerEnvelopeTool(server, {
-    definition: calcShippingDef,
-    inputShape: calcShippingShape,
-    handler: calcShipping,
-    getAuth,
-    getReq
-  });
-  registerEnvelopeTool(server, {
-    definition: calcCommuteDef,
-    inputShape: calcCommuteShape,
-    handler: calcCommute,
-    getAuth,
-    getReq
-  });
-  registerEnvelopeTool(server, {
-    definition: calcOfficeUtilityDef,
-    inputShape: calcOfficeUtilityShape,
-    handler: calcOfficeUtility,
-    getAuth,
-    getReq
+    getAuth
   });
 
   return server;

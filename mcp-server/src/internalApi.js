@@ -282,54 +282,9 @@ const checkAndIncrementIpCounter = async ({
   }
 };
 
-// Discriminated union return shape (mirrors checkAndIncrementRateLimit):
-//   { ok: true, data: { resultId } }
-//   { ok: false, kind: "denied", code, status }
-//   { ok: false, kind: "outage", code, status, isTimeout }
-const recordStoredResult = async ({
-  accountId,
-  keyId,
-  tool,
-  inputs,
-  result,
-  factorSnapshot,
-  sourceAgent
-}) => {
-  try {
-    const data = await request({
-      method: "POST",
-      path: "/api/v1/mcp-stored-results/record",
-      body: { accountId, keyId, tool, inputs, result, factorSnapshot, sourceAgent }
-    });
-    return {
-      ok: true,
-      data: {
-        resultId: data?.resultId || null
-      }
-    };
-  } catch (err) {
-    if (err.isResolutionError) {
-      return {
-        ok: false,
-        kind: "denied",
-        code: err.body?.code || "invalid_input",
-        status: err.status
-      };
-    }
-    return {
-      ok: false,
-      kind: "outage",
-      code: "internal_api_unavailable",
-      status: 503,
-      isTimeout: Boolean(err.isTimeout)
-    };
-  }
-};
-
 export {
   resolveApiKey,
   getToolRegistry,
   checkAndIncrementRateLimit,
-  checkAndIncrementIpCounter,
-  recordStoredResult
+  checkAndIncrementIpCounter
 };
