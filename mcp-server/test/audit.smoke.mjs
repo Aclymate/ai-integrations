@@ -14,6 +14,7 @@ const {
   hashResult,
   redactForLogging,
   recordAuditEntry,
+  runAudited,
   withAudit
 } = await import("../src/middleware/audit.js");
 
@@ -373,6 +374,183 @@ describe("withAudit — MCP handler wrapping", () => {
       assert.equal(result.content[0].text, "ok");
     } finally {
       stderr.restore();
+      restore();
+    }
+  });
+
+  test("tier-3 handler returns an error envelope (not a throw): the call is still audited", async () => {
+    let sentBody = null;
+    const restore = stubFetch(async (url, options) => {
+      sentBody = JSON.parse(options.body);
+      return fetchSuccess()();
+    });
+    try {
+      const errorEnvelope = {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: { code: "rate_limit_exceeded", http_status: 429 } })
+          }
+        ],
+        isError: true
+      };
+      const wrapped = withAudit("t1", async () => errorEnvelope, {
+        getAuth: () => buildAuth(),
+        getSourceAgent: () => "claude"
+      });
+      const result = await wrapped({}, {});
+      assert.equal(result.isError, true);
+      assert.ok(sentBody, "a throttled/errored Tier-3 call is audit-worthy");
+      assert.match(sentBody.resultHash, /^[0-9a-f]{64}$/);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("mcp_audit_missing_identity — anomalous Tier-3 auth", () => {
+  test("withAudit: tier-3 non-test auth missing accountId emits the alert and does NOT write", async () => {
+    let fetchCalled = false;
+    const restore = stubFetch(async () => {
+      fetchCalled = true;
+      return fetchSuccess()();
+    });
+    const stderr = captureStderr();
+    try {
+      const wrapped = withAudit(
+        "t1",
+        async () => ({ content: [{ type: "text", text: "ok" }] }),
+        { getAuth: () => buildAuth({ accountId: null }), getSourceAgent: () => "claude" }
+      );
+      const result = await wrapped({}, {});
+      assert.equal(result.content[0].text, "ok");
+      assert.equal(fetchCalled, false, "no audit write on a missing-identity call");
+      const events = parseEmittedEvents(stderr.captured);
+      const alert = events.find((e) => e.event === "mcp_audit_missing_identity");
+      assert.ok(alert, "expected mcp_audit_missing_identity alert");
+      assert.equal(alert.hasAccountId, false);
+      assert.equal(alert.hasKeyId, true);
+    } finally {
+      stderr.restore();
+      restore();
+    }
+  });
+
+  test("recordAuditEntry (REST path): tier-3 missing keyId emits the alert, no write", async () => {
+    let fetchCalled = false;
+    const restore = stubFetch(async () => {
+      fetchCalled = true;
+      return fetchSuccess()();
+    });
+    const stderr = captureStderr();
+    try {
+      await recordAuditEntry({
+        auth: buildAuth({ keyId: null }),
+        sourceAgent: "claude",
+        toolName: "t1",
+        inputs: {},
+        response: {},
+        latencyMs: 5
+      });
+      assert.equal(fetchCalled, false);
+      const events = parseEmittedEvents(stderr.captured);
+      assert.ok(events.find((e) => e.event === "mcp_audit_missing_identity"));
+    } finally {
+      stderr.restore();
+      restore();
+    }
+  });
+
+  test("a plain tier-1 no-op does NOT emit the missing-identity alert", async () => {
+    const restore = stubFetch(async () => fetchSuccess()());
+    const stderr = captureStderr();
+    try {
+      const wrapped = withAudit(
+        "t1",
+        async () => ({ content: [{ type: "text", text: "ok" }] }),
+        { getAuth: () => buildAuth({ tier: "tier-1" }), getSourceAgent: () => "claude" }
+      );
+      await wrapped({}, {});
+      const events = parseEmittedEvents(stderr.captured);
+      assert.equal(
+        events.find((e) => e.event === "mcp_audit_missing_identity"),
+        undefined
+      );
+    } finally {
+      stderr.restore();
+      restore();
+    }
+  });
+});
+
+describe("runAudited — shared REST/MCP execution core", () => {
+  test("success: runs the thunk, records the call, returns the thunk's result", async () => {
+    let sentBody = null;
+    const restore = stubFetch(async (url, options) => {
+      sentBody = JSON.parse(options.body);
+      return fetchSuccess()();
+    });
+    try {
+      const result = await runAudited({
+        run: async () => ({ ok: "rest-result" }),
+        auth: buildAuth(),
+        sourceAgent: "chatgpt",
+        toolName: "estimate_emissions",
+        inputs: { spend: 100 }
+      });
+      assert.deepEqual(result, { ok: "rest-result" });
+      assert.equal(sentBody.tool, "estimate_emissions");
+      assert.equal(sentBody.sourceAgent, "chatgpt");
+      assert.deepEqual(sentBody.inputs, { spend: 100 });
+    } finally {
+      restore();
+    }
+  });
+
+  test("thunk throws: records an error-marker hash, then re-throws (REST throw path)", async () => {
+    let sentBody = null;
+    const restore = stubFetch(async (url, options) => {
+      sentBody = JSON.parse(options.body);
+      return fetchSuccess()();
+    });
+    try {
+      await assert.rejects(
+        () =>
+          runAudited({
+            run: async () => {
+              throw new Error("rest handler blew up");
+            },
+            auth: buildAuth(),
+            sourceAgent: "claude",
+            toolName: "estimate_emissions",
+            inputs: { spend: 100 }
+          }),
+        /rest handler blew up/
+      );
+      assert.ok(sentBody, "the thrown REST call must still be audited");
+      assert.match(sentBody.resultHash, /^[0-9a-f]{64}$/);
+    } finally {
+      restore();
+    }
+  });
+
+  test("non-audited auth (tier-1): runs the thunk, no write", async () => {
+    let fetchCalled = false;
+    const restore = stubFetch(async () => {
+      fetchCalled = true;
+      return fetchSuccess()();
+    });
+    try {
+      const result = await runAudited({
+        run: async () => ({ ok: true }),
+        auth: buildAuth({ tier: "tier-1" }),
+        sourceAgent: "unknown",
+        toolName: "estimate_emissions",
+        inputs: {}
+      });
+      assert.deepEqual(result, { ok: true });
+      assert.equal(fetchCalled, false);
+    } finally {
       restore();
     }
   });

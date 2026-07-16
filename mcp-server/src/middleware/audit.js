@@ -12,6 +12,28 @@ const shouldAudit = (auth) =>
   Boolean(auth.accountId) &&
   Boolean(auth.keyId);
 
+// A live Tier-3 call that resolved without an accountId/keyId should be
+// impossible (C4's resolver always supplies both). If it happens, the call is
+// NOT audited (shouldAudit is false) — but silently dropping a Tier-3 call is
+// exactly what the SOC-2 posture forbids, so surface it as a monitored alert
+// rather than letting it look like a Tier-1 no-op.
+const hasMissingTier3Identity = (auth) =>
+  Boolean(auth) &&
+  auth.tier === "tier-3" &&
+  !auth.testMode &&
+  (!auth.accountId || !auth.keyId);
+
+const emitMissingIdentityIfAnomalous = (auth, toolName) => {
+  if (hasMissingTier3Identity(auth)) {
+    emitStructuredWarning({
+      event: "mcp_audit_missing_identity",
+      tool: toolName,
+      hasAccountId: Boolean(auth.accountId),
+      hasKeyId: Boolean(auth.keyId)
+    });
+  }
+};
+
 const hashResult = (response) => {
   try {
     return createHash("sha256").update(JSON.stringify(response)).digest("hex");
@@ -34,10 +56,17 @@ const typeToken = (value) => {
   return `<${type}>`;
 };
 
-// Pure, recursive, structure-preserving redaction used ONLY on the
-// Cloud-Logging path (middleware warnings, Sentry breadcrumbs). Never applied
-// to the value stored in the customer's own mcp-audit-log doc — see
-// "Two-destination redaction" in the spec's Key Implementation Notes.
+// Pure, recursive, structure-preserving redactor: every leaf → a type token,
+// keys preserved, depth-capped. Intended for the Cloud-Logging path (any
+// warning or Sentry breadcrumb that needs to carry input SHAPE).
+//
+// NOT YET WIRED into a production log line: today the audit warnings
+// (emitStructuredWarning below) deliberately omit `inputs` entirely, which is
+// strictly safer than logging even a redacted shape. This is exported +
+// unit-tested so the next code that DOES need to log input shape reaches for
+// this instead of logging raw values. Never applied to the value stored in the
+// customer's own mcp-audit-log doc — see "Two-destination redaction" in the
+// spec's Key Implementation Notes.
 const redactForLogging = (value, depth = 0) => {
   if (depth >= REDACTION_MAX_DEPTH) {
     return typeToken(value);
@@ -72,6 +101,7 @@ const recordAuditEntry = async ({
   latencyMs
 }) => {
   if (!shouldAudit(auth)) {
+    emitMissingIdentityIfAnomalous(auth, toolName);
     return;
   }
   try {
@@ -102,13 +132,49 @@ const recordAuditEntry = async ({
   }
 };
 
+// Shared audited-execution core behind BOTH surfaces (withAudit for MCP,
+// executeAndAudit in server.js for REST). Times the thunk, records the outcome
+// — success OR throw — then returns the response / re-throws. On a throw it
+// records a stable error-marker so a thrown Tier-3 tool hashes identically on
+// either surface, and re-throws so the SDK / outer handler still surfaces the
+// error (auditing never swallows a tool error). Callers own the shouldAudit
+// hot-path short-circuit; recordAuditEntry itself no-ops when !shouldAudit, so
+// routing a non-audited call through here is safe (just not free).
+const runAudited = async ({ run, auth, sourceAgent, toolName, inputs }) => {
+  const startedAt = Date.now();
+  let response;
+  try {
+    response = await run();
+  } catch (err) {
+    await recordAuditEntry({
+      auth,
+      sourceAgent,
+      toolName,
+      inputs,
+      response: ERROR_MARKER_RESPONSE,
+      latencyMs: Date.now() - startedAt
+    });
+    throw err;
+  }
+  await recordAuditEntry({
+    auth,
+    sourceAgent,
+    toolName,
+    inputs,
+    response,
+    latencyMs: Date.now() - startedAt
+  });
+  return response;
+};
+
 // Outermost wrapper (MCP surface) — must observe the final response (incl.
 // 429 / tier-gate errors from the inner metering/tierGate/rateLimit chain)
 // and total latency. { getAuth } is mandatory (mirrors withMetering /
-// withTierGate / withRateLimit); { getSourceAgent } is mandatory here too —
-// source-agent detection is computed once per request in server.js via the
-// shared detectSourceAgent(req, auth) (owned by middleware/sourceAgent.js)
-// and threaded down as a closure, matching getAuth/getReq's convention.
+// withTierGate / withRateLimit); { getSourceAgent } is optional and defaults
+// to "unknown" — source-agent detection is computed once per request in
+// server.js via the shared detectSourceAgent(req, auth) (owned by
+// middleware/sourceAgent.js) and threaded down as a closure, matching
+// getAuth/getReq's convention.
 const withAudit = (toolName, handler, options) => {
   if (!options || typeof options.getAuth !== "function") {
     throw new Error(
@@ -119,34 +185,18 @@ const withAudit = (toolName, handler, options) => {
   return async (params, extra) => {
     const auth = getAuth();
     if (!shouldAudit(auth)) {
+      emitMissingIdentityIfAnomalous(auth, toolName);
       return handler(params, extra);
     }
     const sourceAgent =
       typeof getSourceAgent === "function" ? getSourceAgent() || "unknown" : "unknown";
-    const startedAt = Date.now();
-    let response;
-    try {
-      response = await handler(params, extra);
-    } catch (err) {
-      await recordAuditEntry({
-        auth,
-        sourceAgent,
-        toolName,
-        inputs: params,
-        response: ERROR_MARKER_RESPONSE,
-        latencyMs: Date.now() - startedAt
-      });
-      throw err;
-    }
-    await recordAuditEntry({
+    return runAudited({
+      run: () => handler(params, extra),
       auth,
       sourceAgent,
       toolName,
-      inputs: params,
-      response,
-      latencyMs: Date.now() - startedAt
+      inputs: params
     });
-    return response;
   };
 };
 
@@ -155,5 +205,6 @@ export {
   hashResult,
   redactForLogging,
   recordAuditEntry,
+  runAudited,
   withAudit
 };
