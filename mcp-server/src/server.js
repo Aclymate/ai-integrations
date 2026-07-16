@@ -1,6 +1,10 @@
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildServer, ensureRegistryLoaded } from "./buildServer.js";
+
+const require_ = createRequire(import.meta.url);
+const emissionsFactors = require_("@aclymatepackages/emissions-factors");
 // Phase A — 4 envelope-migrated tools
 import { handler as explainScope } from "./tools/explainScope.js";
 import { handler as estimateEmissions } from "./tools/estimateEmissions.js";
@@ -287,7 +291,18 @@ const httpServer = createServer(async (req, res) => {
   }
 });
 
-ensureRegistryLoaded()
+// Building the emissions-factors catalog index (exact-match + fuzzy) is a one-time cost
+// of tens of seconds against the ~100MB catalog. Warming it here, before the server
+// accepts connections, means a real user's first search_factors call never pays it.
+const warmEmissionsFactorsIndex = async () => {
+  const startedAt = Date.now();
+  emissionsFactors.warmup();
+  process.stderr.write(
+    `Warmed emissions-factors catalog index in ${Date.now() - startedAt}ms\n`
+  );
+};
+
+Promise.all([ensureRegistryLoaded(), warmEmissionsFactorsIndex()])
   .then(() => {
     httpServer.listen(PORT, () => {
       process.stderr.write(
@@ -297,7 +312,7 @@ ensureRegistryLoaded()
   })
   .catch((err) => {
     process.stderr.write(
-      `Failed to load mcp-tool-registry at boot: ${err.message}\n`
+      `Failed to complete boot sequence: ${err.message}\n`
     );
     process.exit(1);
   });

@@ -57,14 +57,26 @@ const dedupeByFactorId = (factors) => {
   }, []);
 };
 
+// Exact match (findFactorsByAlias/findFactorsBySearchTerm) is the primary, indexed path.
+// A miss falls back to the fuzzy token-overlap matcher, which tolerates hyphenation, word
+// order, and extra/missing words that defeat exact string matching. Callers get a lower
+// confidence + a warning when the fuzzy path served the result — see handler below.
 const searchAllTypes = (query) => {
   const byAlias = emissionsFactors.findFactorsByAlias(query);
   const bySearchTerm = emissionsFactors.findFactorsBySearchTerm(query);
-  return dedupeByFactorId([...byAlias, ...bySearchTerm]);
+  const exact = dedupeByFactorId([...byAlias, ...bySearchTerm]);
+  if (exact.length > 0) return { matches: exact, usedFuzzy: false };
+  return { matches: emissionsFactors.findFactorsFuzzy(query), usedFuzzy: true };
 };
 
-const searchWithinType = (factorType, query) =>
-  emissionsFactors.listFactorsByType(factorType, { search: query });
+const searchWithinType = (factorType, query) => {
+  const exact = emissionsFactors.listFactorsByType(factorType, { search: query });
+  if (exact.length > 0) return { matches: exact, usedFuzzy: false };
+  const fuzzy = emissionsFactors
+    .findFactorsFuzzy(query)
+    .filter((factor) => factor.factor_type === factorType);
+  return { matches: fuzzy, usedFuzzy: fuzzy.length > 0 };
+};
 
 const handler = async (rawParams) => {
   const parsed = zodSchema.safeParse(rawParams ?? {});
@@ -92,7 +104,7 @@ const handler = async (rawParams) => {
     }
   }
 
-  const matches = factor_type
+  const { matches, usedFuzzy } = factor_type
     ? searchWithinType(factor_type, query)
     : searchAllTypes(query);
 
@@ -114,14 +126,24 @@ const handler = async (rawParams) => {
 
   const truncated = matches.length > SEARCH_CAP;
   const trimmed = truncated ? matches.slice(0, SEARCH_CAP) : matches;
-  const warnings = truncated
-    ? [
-        {
-          code: WARNING_CODES.RESULT_TRUNCATED,
-          message: `Showing ${SEARCH_CAP} of ${matches.length} matches. Narrow with factor_type or a more specific query.`
-        }
-      ]
-    : [];
+  const warnings = [
+    ...(truncated
+      ? [
+          {
+            code: WARNING_CODES.RESULT_TRUNCATED,
+            message: `Showing ${SEARCH_CAP} of ${matches.length} matches. Narrow with factor_type or a more specific query.`
+          }
+        ]
+      : []),
+    ...(usedFuzzy
+      ? [
+          {
+            code: WARNING_CODES.FUZZY_MATCH,
+            message: `No exact match for '${query}' — showing the closest fuzzy matches instead. Verify these are the intended factors.`
+          }
+        ]
+      : [])
+  ];
 
   return buildSuccessEnvelope({
     result: {
@@ -129,7 +151,7 @@ const handler = async (rawParams) => {
       count: matches.length
     },
     sources: [],
-    confidence: "high",
+    confidence: usedFuzzy ? "medium" : "high",
     warnings,
     factorSnapshot: FACTOR_SNAPSHOT,
     upgradeHint: null
