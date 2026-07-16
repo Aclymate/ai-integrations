@@ -23,6 +23,7 @@ import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js
 // B-Tier1-recommender — 1 tool
 import { handler as recommendReductions } from "./tools/recommender/recommendEmissionsReductions.js";
 import { authMiddleware } from "./middleware/auth.js";
+import { detectSourceAgent } from "./middleware/sourceAgent.js";
 import { enforceMeteringForRest } from "./middleware/metering.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
 import {
@@ -216,17 +217,21 @@ const handleRestRoute = async (req, res, route) => {
   sendJson(res, status, withHint);
 };
 
-// buildServer({auth}) is called PER REQUEST. Each call captures req.auth in a
-// `getAuth` closure that is threaded into every withTierGate(...) wrap inside
-// buildServer.js. If a future maintainer hoists `buildServer` to module scope
-// to save latency, per-request auth is lost — stale/null/cross-request. Do NOT
-// do that without also passing auth explicitly through the SDK's extra.authInfo.
+// buildServer({auth, req}) is called PER REQUEST. Each call captures req.auth
+// and req in `getAuth`/`getReq` closures that are threaded into every
+// withTierGate(...)/withStoredResults(...) wrap inside buildServer.js. If a
+// future maintainer hoists `buildServer` to module scope to save latency,
+// per-request auth/req is lost — stale/null/cross-request. Do NOT do that
+// without also passing auth explicitly through the SDK's extra.authInfo.
 const handleMcpRoute = async (req, res) => {
   const chain = withMiddleware(authMiddleware);
   const outcome = await chain(req, res);
   if (!outcome?.proceed) {
     return;
   }
+  // Computed once here (the request boundary) and threaded to consuming
+  // middleware via getReq() — not re-detected per middleware.
+  req.sourceAgent = detectSourceAgent(req, req.auth);
   let body;
   try {
     body = await parseBody(req);
@@ -241,7 +246,7 @@ const handleMcpRoute = async (req, res) => {
     sendInvalidJson(res);
     return;
   }
-  const server = await buildServer({ auth: req.auth });
+  const server = await buildServer({ auth: req.auth, req });
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
   });
