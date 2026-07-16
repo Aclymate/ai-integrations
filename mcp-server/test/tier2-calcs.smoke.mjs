@@ -23,6 +23,7 @@ import {
 } from "../src/tools/tier2/calculateOfficeUtilityEmissions.js";
 import { resolveVehicleFactor } from "../src/tools/tier2/vehicleFactorLookup.js";
 import { detectSourceAgent } from "../src/middleware/sourceAgent.js";
+import { shouldSkip } from "../src/middleware/storedResults.js";
 import commuteCalcs from "@aclymatepackages/calcs/recurring/commuting.js";
 
 const { commuteTonsFromDistance } = commuteCalcs;
@@ -185,4 +186,28 @@ test("detectSourceAgent — unknown x-aclymate-source header falls through to Us
 
 test("detectSourceAgent — no signals at all defaults to unknown", () => {
   assert.equal(detectSourceAgent({ headers: {} }, null), "unknown");
+});
+
+test("storedResults shouldSkip — tier-2 key is recorded", () => {
+  assert.equal(shouldSkip({ keyId: "k", tier: "tier-2", testMode: false }), false);
+});
+
+test("storedResults shouldSkip — tier-3 key is recorded too (rank-based, not exact-match)", () => {
+  assert.equal(shouldSkip({ keyId: "k", tier: "tier-3", testMode: false }), false);
+});
+
+test("storedResults shouldSkip — tier-1 key is skipped", () => {
+  assert.equal(shouldSkip({ keyId: "k", tier: "tier-1", testMode: false }), true);
+});
+
+test("storedResults shouldSkip — testMode is skipped regardless of tier", () => {
+  assert.equal(shouldSkip({ keyId: "k", tier: "tier-2", testMode: true }), true);
+});
+
+test("storedResults shouldSkip — no keyId is skipped", () => {
+  assert.equal(shouldSkip({ keyId: null, tier: "tier-2", testMode: false }), true);
+});
+
+test("storedResults shouldSkip — null auth is skipped", () => {
+  assert.equal(shouldSkip(null), true);
 });

@@ -1,5 +1,6 @@
 import { recordStoredResult } from "../internalApi.js";
 import { emitStructuredWarning } from "./upgradeHints.js";
+import { meetsTierRequirement } from "./toolTierGate.js";
 
 const shouldSkip = (auth) => {
   if (!auth) {
@@ -8,7 +9,10 @@ const shouldSkip = (auth) => {
   if (!auth.keyId) {
     return true;
   }
-  if (auth.tier !== "tier-2") {
+  // Rank-based, matching withTierGate's own access check — a tier-3 key
+  // calling a Tier-2 tool must still be recorded, not silently dropped just
+  // because its tier isn't the exact string "tier-2".
+  if (!meetsTierRequirement(auth.tier, "tier-2")) {
     return true;
   }
   if (auth.testMode) {
