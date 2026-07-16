@@ -24,6 +24,7 @@ import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js
 import { handler as recommendReductions } from "./tools/recommender/recommendEmissionsReductions.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { detectSourceAgent } from "./middleware/sourceAgent.js";
+import { recordAuditEntry } from "./middleware/audit.js";
 import { enforceMeteringForRest } from "./middleware/metering.js";
 import { enforceToolTierForRest } from "./middleware/toolTierGate.js";
 import {
@@ -204,7 +205,17 @@ const handleRestRoute = async (req, res, route) => {
     sendInvalidJson(res);
     return;
   }
+  const sourceAgent = detectSourceAgent(req, req.auth);
+  const startedAt = Date.now();
   const result = await route.execute(body);
+  await recordAuditEntry({
+    auth: req.auth,
+    sourceAgent,
+    toolName: route.toolName,
+    inputs: body,
+    response: result,
+    latencyMs: Date.now() - startedAt
+  });
   const status = result?.error?.http_status ?? 200;
   // Anonymous (req.meter) and authenticated (req.rateLimit) nudge zones are
   // disjoint by construction — both middlewares' shouldSkip predicates are
