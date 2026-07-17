@@ -370,11 +370,102 @@ const recordAuditLogEntry = async ({
   }
 };
 
+// Discriminated union return shape:
+//   { ok: true, data: { enrichedTransactions } }
+//   { ok: false, kind: "outage", code, status, isTimeout } — true network/timeout failure
+//   { ok: false, kind: "plaid_error", code, status } — endpoint reached but rejected the
+//     batch (validation) or Plaid itself failed (502); both cases map to the same
+//     plaid_enrichment_failed code per spec — only a network-level failure is an "outage"
+const enrichPlaidTransactions = async ({ transactions, accountType }) => {
+  try {
+    const data = await request({
+      method: "POST",
+      path: "/api/v1/plaid/enrich",
+      body: { transactions, accountType }
+    });
+    return {
+      ok: true,
+      data: {
+        enrichedTransactions: Array.isArray(data?.enrichedTransactions)
+          ? data.enrichedTransactions
+          : []
+      }
+    };
+  } catch (err) {
+    if (err.isTimeout || err.isNetworkError) {
+      return {
+        ok: false,
+        kind: "outage",
+        code: "internal_api_unavailable",
+        status: 503,
+        isTimeout: Boolean(err.isTimeout)
+      };
+    }
+    return {
+      ok: false,
+      kind: "plaid_error",
+      code: err.body?.code || "plaid_enrichment_failed",
+      status: err.status || 502
+    };
+  }
+};
+
+// Discriminated union return shape (mirrors checkAndIncrementRateLimit):
+//   { ok: true, data: { allowed, callsRemainingToday, dailyLimit, resetAtIso } }
+//   { ok: false, kind: "denied", code, status }
+//   { ok: false, kind: "outage", code, status, isTimeout }
+const checkAndIncrementToolCounter = async ({
+  companyId,
+  keyId,
+  toolName,
+  dailyLimit
+}) => {
+  try {
+    const data = await request({
+      method: "POST",
+      path: "/api/v1/mcp-tools/check-and-increment-tool-counter",
+      body: { companyId, keyId, toolName, dailyLimit }
+    });
+    return {
+      ok: true,
+      data: {
+        allowed: Boolean(data?.allowed),
+        callsRemainingToday:
+          typeof data?.callsRemainingToday === "number"
+            ? data.callsRemainingToday
+            : 0,
+        dailyLimit:
+          typeof data?.dailyLimit === "number" ? data.dailyLimit : null,
+        resetAtIso:
+          typeof data?.resetAtIso === "string" ? data.resetAtIso : null
+      }
+    };
+  } catch (err) {
+    if (err.isResolutionError) {
+      return {
+        ok: false,
+        kind: "denied",
+        code: err.body?.code || "invalid_input",
+        status: err.status
+      };
+    }
+    return {
+      ok: false,
+      kind: "outage",
+      code: "internal_api_unavailable",
+      status: 503,
+      isTimeout: Boolean(err.isTimeout)
+    };
+  }
+};
+
 export {
   resolveApiKey,
   getToolRegistry,
   checkAndIncrementRateLimit,
   checkAndIncrementIpCounter,
   recordStoredResult,
-  recordAuditLogEntry
+  recordAuditLogEntry,
+  enrichPlaidTransactions,
+  checkAndIncrementToolCounter
 };
