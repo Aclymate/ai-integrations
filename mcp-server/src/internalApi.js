@@ -68,9 +68,9 @@ const wrapRequestError = (err) => {
   return wrapped;
 };
 
-const localRequest = async ({ method, url, body }) => {
+const localRequest = async ({ method, url, body, timeoutMs }) => {
   const controller = new AbortController();
-  const timeoutTimer = setTimeout(() => controller.abort(), INTERNAL_API_TIMEOUT_MS);
+  const timeoutTimer = setTimeout(() => controller.abort(), timeoutMs);
   const options = {
     method,
     headers: {},
@@ -96,7 +96,12 @@ const localRequest = async ({ method, url, body }) => {
   }
 };
 
-const request = async ({ method, path, body }) => {
+const request = async ({
+  method,
+  path,
+  body,
+  timeoutMs = INTERNAL_API_TIMEOUT_MS
+}) => {
   const url = `${getBaseUrl()}${path}`;
 
   if (isLocalUrl(url)) {
@@ -104,7 +109,7 @@ const request = async ({ method, path, body }) => {
       `[internalApi] localhost bypass — request without OIDC (${method} ${path})\n`
     );
     try {
-      return await localRequest({ method, url, body });
+      return await localRequest({ method, url, body, timeoutMs });
     } catch (err) {
       throw wrapRequestError(err);
     }
@@ -112,7 +117,7 @@ const request = async ({ method, path, body }) => {
 
   const client = await getClient();
   const controller = new AbortController();
-  const timeoutTimer = setTimeout(() => controller.abort(), INTERNAL_API_TIMEOUT_MS);
+  const timeoutTimer = setTimeout(() => controller.abort(), timeoutMs);
   const options = {
     url,
     method,
@@ -370,11 +375,90 @@ const recordAuditLogEntry = async ({
   }
 };
 
+// Tier-3 customer-data reads (B-Tier3-reads). Each POSTs to an OIDC-gated
+// renew-west internal-api endpoint and returns the shared discriminated union:
+//   { ok: true, data }
+//   { ok: false, kind: "denied", code, status, body }   — 4xx (validation / not_found / gate)
+//   { ok: false, kind: "outage", code, status, isTimeout } — 5xx / network / timeout
+// `body` on the denied branch carries the renew-west error body so a tool can
+// surface an `upgrade_hint` (e.g. pcf_subscription_required).
+const DISCLOSURE_TIMEOUT_MS = 20000;
+const PRODUCT_FOOTPRINT_TIMEOUT_MS = 15000;
+
+const buildDeniedResult = (err) => ({
+  ok: false,
+  kind: "denied",
+  code: err.body?.code || "invalid_input",
+  status: err.status,
+  body: err.body || null
+});
+
+const buildOutageResult = (err) => ({
+  ok: false,
+  kind: "outage",
+  code: "internal_api_unavailable",
+  status: 503,
+  isTimeout: Boolean(err.isTimeout)
+});
+
+const customerDataRead = async ({ path, body, timeoutMs }) => {
+  try {
+    const data = await request({ method: "POST", path, body, timeoutMs });
+    return { ok: true, data };
+  } catch (err) {
+    return err.isResolutionError ? buildDeniedResult(err) : buildOutageResult(err);
+  }
+};
+
+const getEmissionsSummary = ({ companyId, startDate, endDate }) =>
+  customerDataRead({
+    path: "/api/v1/company-emissions/summary",
+    body: { companyId, startDate, endDate }
+  });
+
+const listEmissionSources = ({ companyId, startDate, endDate, groupBy, limit }) =>
+  customerDataRead({
+    path: "/api/v1/company-emissions/sources",
+    body: { companyId, startDate, endDate, groupBy, limit }
+  });
+
+const getVendorBreakdown = ({ companyId, startDate, endDate, limit }) =>
+  customerDataRead({
+    path: "/api/v1/company-emissions/vendor-breakdown",
+    body: { companyId, startDate, endDate, limit }
+  });
+
+const auditNumber = ({ companyId, transactionId }) =>
+  customerDataRead({
+    path: "/api/v1/company-emissions/audit-number",
+    body: { companyId, transactionId }
+  });
+
+const generateDisclosureResponse = ({ companyId, question, framework }) =>
+  customerDataRead({
+    path: "/api/v1/company-emissions/disclosure-response",
+    body: { companyId, question, framework },
+    timeoutMs: DISCLOSURE_TIMEOUT_MS
+  });
+
+const resolveProductFootprint = ({ companyId, productId }) =>
+  customerDataRead({
+    path: "/api/v1/product-footprint/resolve",
+    body: { companyId, productId },
+    timeoutMs: PRODUCT_FOOTPRINT_TIMEOUT_MS
+  });
+
 export {
   resolveApiKey,
   getToolRegistry,
   checkAndIncrementRateLimit,
   checkAndIncrementIpCounter,
   recordStoredResult,
-  recordAuditLogEntry
+  recordAuditLogEntry,
+  getEmissionsSummary,
+  listEmissionSources,
+  getVendorBreakdown,
+  auditNumber,
+  generateDisclosureResponse,
+  resolveProductFootprint
 };

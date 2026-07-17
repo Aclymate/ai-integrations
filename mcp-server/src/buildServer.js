@@ -129,6 +129,37 @@ import {
   inputShape as calcOfficeUtilityShape,
   handler as calcOfficeUtility
 } from "./tools/tier2/calculateOfficeUtilityEmissions.js";
+// B-Tier3-reads — 6 tools (5 read-only customer-data + PCF)
+import {
+  definition as getEmissionsSummaryDef,
+  inputShape as getEmissionsSummaryShape,
+  handler as getEmissionsSummary
+} from "./tools/tier3/reads/getEmissionsSummary.js";
+import {
+  definition as listEmissionSourcesDef,
+  inputShape as listEmissionSourcesShape,
+  handler as listEmissionSources
+} from "./tools/tier3/reads/listEmissionSources.js";
+import {
+  definition as getVendorBreakdownDef,
+  inputShape as getVendorBreakdownShape,
+  handler as getVendorBreakdown
+} from "./tools/tier3/reads/getVendorBreakdown.js";
+import {
+  definition as auditANumberDef,
+  inputShape as auditANumberShape,
+  handler as auditANumber
+} from "./tools/tier3/reads/auditANumber.js";
+import {
+  definition as disclosureResponseDef,
+  inputShape as disclosureResponseShape,
+  handler as disclosureResponse
+} from "./tools/tier3/reads/generateDisclosureResponse.js";
+import {
+  definition as productFootprintDef,
+  inputShape as productFootprintShape,
+  handler as productFootprint
+} from "./tools/tier3/reads/calculateProductCarbonFootprint.js";
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
 import { withRateLimit } from "./middleware/rateLimit.js";
@@ -165,6 +196,42 @@ const registerEnvelopeTool = (
                   getReq
                 })(params)
               ),
+            { getAuth }
+          ),
+          { getAuth }
+        ),
+        { getAuth }
+      ),
+      { getAuth, getSourceAgent }
+    )
+  );
+};
+
+// Tier-3 customer-data reads (B-Tier3-reads). Same middleware order as
+// registerEnvelopeTool MINUS withStoredResults (tier-3 reads must not write
+// mcp-stored-results — those are Tier-2). The handler receives `{ auth }` as
+// its second argument so it can read `auth.accountId` (the companyId) and pass
+// it to the internalApi read wrappers. withAudit stays outermost so it observes
+// the final response including any tier/rate-limit errors.
+const registerCustomerDataTool = (
+  server,
+  { definition, inputShape, handler, getAuth, getSourceAgent }
+) => {
+  server.tool(
+    definition.name,
+    definition.description,
+    inputShape,
+    { title: definition.title, readOnlyHint: true },
+    withAudit(
+      definition.name,
+      withMetering(
+        definition.name,
+        withTierGate(
+          definition.name,
+          withRateLimit(
+            definition.name,
+            async (params) =>
+              envelopeToContent(await handler(params, { auth: getAuth() })),
             { getAuth }
           ),
           { getAuth }
@@ -424,6 +491,50 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
     handler: calcOfficeUtility,
     getAuth,
     getReq,
+    getSourceAgent
+  });
+
+  // B-Tier3-reads — 6 tools (5 read-only customer-data + PCF)
+  registerCustomerDataTool(server, {
+    definition: getEmissionsSummaryDef,
+    inputShape: getEmissionsSummaryShape,
+    handler: getEmissionsSummary,
+    getAuth,
+    getSourceAgent
+  });
+  registerCustomerDataTool(server, {
+    definition: listEmissionSourcesDef,
+    inputShape: listEmissionSourcesShape,
+    handler: listEmissionSources,
+    getAuth,
+    getSourceAgent
+  });
+  registerCustomerDataTool(server, {
+    definition: getVendorBreakdownDef,
+    inputShape: getVendorBreakdownShape,
+    handler: getVendorBreakdown,
+    getAuth,
+    getSourceAgent
+  });
+  registerCustomerDataTool(server, {
+    definition: auditANumberDef,
+    inputShape: auditANumberShape,
+    handler: auditANumber,
+    getAuth,
+    getSourceAgent
+  });
+  registerCustomerDataTool(server, {
+    definition: disclosureResponseDef,
+    inputShape: disclosureResponseShape,
+    handler: disclosureResponse,
+    getAuth,
+    getSourceAgent
+  });
+  registerCustomerDataTool(server, {
+    definition: productFootprintDef,
+    inputShape: productFootprintShape,
+    handler: productFootprint,
+    getAuth,
     getSourceAgent
   });
 
