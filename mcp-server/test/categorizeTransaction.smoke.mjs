@@ -206,6 +206,35 @@ describe("handler — failure mapping", () => {
       restore();
     }
   });
+
+  test("untagged 5xx (e.g. an unrelated internal-API crash): internal_api_unavailable, NOT mislabeled as a Plaid failure", async () => {
+    const restore = stubFetch(async () => ({
+      ok: false,
+      status: 500,
+      text: async () => JSON.stringify({ error: true, message: "unexpected crash" })
+    }));
+    try {
+      const env = await handler({ transactions: [buildTransaction()] });
+      assert.equal(env.error.code, "internal_api_unavailable");
+      assert.equal(env.error.http_status, 503);
+    } finally {
+      restore();
+    }
+  });
+
+  test("502 without the plaid_enrichment_failed tag: also treated as outage, not assumed to be Plaid", async () => {
+    const restore = stubFetch(async () => ({
+      ok: false,
+      status: 502,
+      text: async () => JSON.stringify({ error: true, code: "some_other_error", message: "bad gateway" })
+    }));
+    try {
+      const env = await handler({ transactions: [buildTransaction()] });
+      assert.equal(env.error.code, "internal_api_unavailable");
+    } finally {
+      restore();
+    }
+  });
 });
 
 const results = [];

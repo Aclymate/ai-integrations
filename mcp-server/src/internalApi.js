@@ -370,12 +370,20 @@ const recordAuditLogEntry = async ({
   }
 };
 
+// The plaid/enrich endpoint tags a genuine Plaid failure with this exact
+// (status, code) pair — see plaidEnrich.js's catch block. This is the only
+// signal that distinguishes "Plaid itself failed" from any other 5xx (a bug,
+// a crash, an untagged outage), which must NOT be mislabeled as a Plaid
+// failure — the agent-facing message differs (retry vs. "Plaid is down").
+const isTaggedPlaidFailure = (err) =>
+  err.status === 502 && err.body?.code === "plaid_enrichment_failed";
+
 // Discriminated union return shape:
 //   { ok: true, data: { enrichedTransactions } }
-//   { ok: false, kind: "outage", code, status, isTimeout } — true network/timeout failure
-//   { ok: false, kind: "plaid_error", code, status } — endpoint reached but rejected the
-//     batch (validation) or Plaid itself failed (502); both cases map to the same
-//     plaid_enrichment_failed code per spec — only a network-level failure is an "outage"
+//   { ok: false, kind: "outage", code, status, isTimeout } — network/timeout failure,
+//     or any 5xx that ISN'T the tagged Plaid failure above (fail-closed default)
+//   { ok: false, kind: "plaid_error", code, status } — the endpoint reached Plaid and
+//     it failed (tagged 502), or rejected the batch outright (4xx validation)
 const enrichPlaidTransactions = async ({ transactions, accountType }) => {
   try {
     const data = await request({
@@ -392,20 +400,28 @@ const enrichPlaidTransactions = async ({ transactions, accountType }) => {
       }
     };
   } catch (err) {
-    if (err.isTimeout || err.isNetworkError) {
+    if (isTaggedPlaidFailure(err)) {
       return {
         ok: false,
-        kind: "outage",
-        code: "internal_api_unavailable",
-        status: 503,
-        isTimeout: Boolean(err.isTimeout)
+        kind: "plaid_error",
+        code: "plaid_enrichment_failed",
+        status: 502
+      };
+    }
+    if (err.isResolutionError) {
+      return {
+        ok: false,
+        kind: "plaid_error",
+        code: err.body?.code || "plaid_enrichment_failed",
+        status: err.status
       };
     }
     return {
       ok: false,
-      kind: "plaid_error",
-      code: err.body?.code || "plaid_enrichment_failed",
-      status: err.status || 502
+      kind: "outage",
+      code: "internal_api_unavailable",
+      status: 503,
+      isTimeout: Boolean(err.isTimeout)
     };
   }
 };
