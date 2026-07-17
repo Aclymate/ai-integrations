@@ -1,0 +1,81 @@
+name: MCP Bootstrap Test
+
+concurrency:
+  group: mcp-bootstrap-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    paths:
+      - "claude/**"
+      - "openai/**"
+      - "gemini/**"
+      - ".github/workflows/mcp-bootstrap-test.yml"
+  push:
+    branches: [mcp]
+    paths:
+      - "claude/**"
+      - "openai/**"
+      - "gemini/**"
+      - ".github/workflows/mcp-bootstrap-test.yml"
+  workflow_dispatch:
+    inputs:
+      gate:
+        description: "Hit-rate gate override (0-1, defaults to the fixture's own gate)"
+        required: false
+
+jobs:
+  bootstrap-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Tool-parity + smoke tests (mcp-server, self-contained)
+        run: npm ci && npm test
+        working-directory: mcp-server
+
+      - name: Mint installation token for internal (read-only, this repo only)
+        id: internal-app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: Aclymate
+          repositories: internal
+          permission-contents: read
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Aclymate/internal
+          ref: mcp
+          path: internal-mcp
+          token: ${{ steps.internal-app-token.outputs.token }}
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v3
+
+      - name: Inject secrets via Doppler
+        uses: dopplerhq/secrets-fetch-action@v1.2.0
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN }}
+          inject-env-vars: true
+
+      - name: Install internal/functions dependencies
+        run: npm ci
+        working-directory: internal-mcp/functions
+
+      - name: Run bootstrap-hit-rate gate
+        run: node scripts/report-bootstrap-run.js --gate="${GATE_OVERRIDE:-0.5}"
+        working-directory: internal-mcp/functions
+        env:
+          GATE_OVERRIDE: ${{ github.event.inputs.gate }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
