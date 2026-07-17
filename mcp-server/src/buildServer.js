@@ -129,6 +129,22 @@ import {
   inputShape as calcOfficeUtilityShape,
   handler as calcOfficeUtility
 } from "./tools/tier2/calculateOfficeUtilityEmissions.js";
+// B-Tier3-calcs — 3 tools (Tier-3 stateless calc wrappers)
+import {
+  definition as calcTransactionEmissionsDef,
+  inputShape as calcTransactionEmissionsShape,
+  handler as calcTransactionEmissions
+} from "./tools/tier3/calcs/calculateTransactionEmissions.js";
+import {
+  definition as calcEventAttendeeEmissionsDef,
+  inputShape as calcEventAttendeeEmissionsShape,
+  handler as calcEventAttendeeEmissions
+} from "./tools/tier3/calcs/calculateEventAttendeeEmissions.js";
+import {
+  definition as calcEventTotalEmissionsDef,
+  inputShape as calcEventTotalEmissionsShape,
+  handler as calcEventTotalEmissions
+} from "./tools/tier3/calcs/calculateEventTotalEmissions.js";
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
 import { withRateLimit } from "./middleware/rateLimit.js";
@@ -422,6 +438,32 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
     definition: calcOfficeUtilityDef,
     inputShape: calcOfficeUtilityShape,
     handler: calcOfficeUtility,
+    getAuth,
+    getReq,
+    getSourceAgent
+  });
+
+  // B-Tier3-calcs — 3 tools (Tier-3 stateless calc wrappers)
+  registerEnvelopeTool(server, {
+    definition: calcTransactionEmissionsDef,
+    inputShape: calcTransactionEmissionsShape,
+    handler: calcTransactionEmissions,
+    getAuth,
+    getReq,
+    getSourceAgent
+  });
+  registerEnvelopeTool(server, {
+    definition: calcEventAttendeeEmissionsDef,
+    inputShape: calcEventAttendeeEmissionsShape,
+    handler: calcEventAttendeeEmissions,
+    getAuth,
+    getReq,
+    getSourceAgent
+  });
+  registerEnvelopeTool(server, {
+    definition: calcEventTotalEmissionsDef,
+    inputShape: calcEventTotalEmissionsShape,
+    handler: calcEventTotalEmissions,
     getAuth,
     getReq,
     getSourceAgent
