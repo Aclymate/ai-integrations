@@ -160,12 +160,19 @@ import {
   inputShape as productFootprintShape,
   handler as productFootprint
 } from "./tools/tier3/reads/calculateProductCarbonFootprint.js";
+// B-Tier3-plaid — 1 tool
+import {
+  definition as categorizeTransactionDef,
+  inputShape as categorizeTransactionShape,
+  handler as categorizeTransaction
+} from "./tools/tier3/categorizeTransaction.js";
 import { loadToolRegistry, startRegistryRefresh } from "./toolRegistry.js";
 import { withTierGate } from "./middleware/toolTierGate.js";
 import { withRateLimit } from "./middleware/rateLimit.js";
 import { withMetering } from "./middleware/metering.js";
 import { withStoredResults } from "./middleware/storedResults.js";
 import { withAudit } from "./middleware/audit.js";
+import { withToolCallCap } from "./middleware/toolCallCap.js";
 
 const envelopeToContent = (envelope) => ({
   content: [{ type: "text", text: JSON.stringify(envelope) }],
@@ -191,10 +198,14 @@ const registerEnvelopeTool = (
             definition.name,
             async (params) =>
               envelopeToContent(
-                await withStoredResults(definition.name, handler, {
-                  getAuth,
-                  getReq
-                })(params)
+                await withToolCallCap(
+                  definition.name,
+                  withStoredResults(definition.name, handler, {
+                    getAuth,
+                    getReq
+                  }),
+                  { getAuth }
+                )(params)
               ),
             { getAuth }
           ),
@@ -535,6 +546,16 @@ const buildServer = async ({ auth = null, req = null } = {}) => {
     inputShape: productFootprintShape,
     handler: productFootprint,
     getAuth,
+    getSourceAgent
+  });
+
+  // B-Tier3-plaid — 1 tool
+  registerEnvelopeTool(server, {
+    definition: categorizeTransactionDef,
+    inputShape: categorizeTransactionShape,
+    handler: categorizeTransaction,
+    getAuth,
+    getReq,
     getSourceAgent
   });
 
