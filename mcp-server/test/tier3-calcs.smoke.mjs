@@ -44,6 +44,17 @@ test("calculate_transaction_emissions — spend-based without tonsCo2ePerDollar 
   assertErrorEnvelope(env, "invalid_input");
 });
 
+test("calculate_transaction_emissions — negative dollarAmount (refund/credit) matches Navigator's returnPositiveTons behavior", async () => {
+  const env = await calcTransactionEmissions({
+    dollarAmount: -500,
+    subcategory: "spend-based",
+    tonsCo2ePerDollar: 0.0002
+  });
+  assertSuccessEnvelope(env);
+  assert.ok(Math.abs(env.result.tCO2e - Math.abs(-500 * 0.0002)) < 1e-12);
+  assert.ok(env.result.tCO2e >= 0);
+});
+
 test("calculate_transaction_emissions — NAICS subcategory ('flights') matches @aclymatepackages/lists factor × amount", async () => {
   const env = await calcTransactionEmissions({ dollarAmount: 1000, subcategory: "flights" });
   assertSuccessEnvelope(env);
@@ -142,6 +153,20 @@ test("calculate_event_total_emissions — all-virtual event (attendeeCount prese
     venueGasTons: 0
   });
   assertSuccessEnvelope(env);
+});
+
+test("calculate_event_total_emissions — attendeesStateBreakdown percentages summing above 100 is invalid_input, not a silently-wrong number", async () => {
+  const env = await calcEventTotalEmissions({
+    eventCoordinates: SF_EVENT,
+    eventCountry: "US",
+    eventDefaultAirport: { latitude: 37.6213, longitude: -122.379 },
+    attendeeCount: 100,
+    attendeesStateBreakdown: [
+      { state: "california", percentage: 60 },
+      { state: "new york", percentage: 60 }
+    ]
+  });
+  assertErrorEnvelope(env, "invalid_input");
 });
 
 test("calculate_event_total_emissions — missing attendeeCount is invalid_input", async () => {

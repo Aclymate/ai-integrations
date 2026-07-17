@@ -117,6 +117,16 @@ const handler = async (rawParams) => {
     );
   }
 
+  const stateBreakdownTotalPercentage = attendeesStateBreakdown.reduce(
+    (sum, { percentage }) => sum + percentage,
+    0
+  );
+  if (stateBreakdownTotalPercentage > 100) {
+    return buildValidationError(
+      `attendeesStateBreakdown percentages sum to ${stateBreakdownTotalPercentage}, which exceeds 100.`
+    );
+  }
+
   const event = {
     id: eventId,
     address: { country: eventCountry, coordinates: eventCoordinates, state: eventState, city: eventCity },

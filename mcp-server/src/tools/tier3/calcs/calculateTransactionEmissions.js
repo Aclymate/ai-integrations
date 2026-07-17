@@ -20,8 +20,9 @@ const inputShape = {
   dollarAmount: z
     .number()
     .finite()
-    .positive()
-    .describe("Transaction amount, in US dollars."),
+    .describe(
+      "Transaction amount, in US dollars. Negative amounts (refunds/credits) are accepted — the result is always a positive tCO2e, matching Navigator's own transaction calc."
+    ),
   subcategory: z
     .string()
     .describe(
@@ -76,7 +77,7 @@ const calculateSpendBased = ({ dollarAmount, tonsCo2ePerDollar }) => {
       "subcategory 'spend-based' requires tonsCo2ePerDollar."
     );
   }
-  const tCO2e = tonsCo2ePerDollar * dollarAmount;
+  const tCO2e = Math.abs(tonsCo2ePerDollar * dollarAmount);
   if (!isValidCalcResult(tCO2e)) {
     return buildUnexpectedOutputError(tCO2e);
   }
@@ -104,7 +105,7 @@ const calculateNaics = ({ dollarAmount, subcategory }) => {
     );
   }
 
-  const tCO2e = naics.tonsCo2ePerDollar * dollarAmount;
+  const tCO2e = Math.abs(naics.tonsCo2ePerDollar * dollarAmount);
   if (!isValidCalcResult(tCO2e)) {
     return buildUnexpectedOutputError(tCO2e);
   }
