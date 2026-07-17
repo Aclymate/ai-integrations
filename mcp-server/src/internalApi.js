@@ -370,11 +370,118 @@ const recordAuditLogEntry = async ({
   }
 };
 
+// The plaid/enrich endpoint tags a genuine Plaid failure with this exact
+// (status, code) pair — see plaidEnrich.js's catch block. This is the only
+// signal that distinguishes "Plaid itself failed" from any other 5xx (a bug,
+// a crash, an untagged outage), which must NOT be mislabeled as a Plaid
+// failure — the agent-facing message differs (retry vs. "Plaid is down").
+const isTaggedPlaidFailure = (err) =>
+  err.status === 502 && err.body?.code === "plaid_enrichment_failed";
+
+// Discriminated union return shape:
+//   { ok: true, data: { enrichedTransactions } }
+//   { ok: false, kind: "outage", code, status, isTimeout } — network/timeout failure,
+//     or any 5xx that ISN'T the tagged Plaid failure above (fail-closed default)
+//   { ok: false, kind: "plaid_error", code, status } — the endpoint reached Plaid and
+//     it failed (tagged 502), or rejected the batch outright (4xx validation)
+const enrichPlaidTransactions = async ({ transactions, accountType }) => {
+  try {
+    const data = await request({
+      method: "POST",
+      path: "/api/v1/plaid/enrich",
+      body: { transactions, accountType }
+    });
+    return {
+      ok: true,
+      data: {
+        enrichedTransactions: Array.isArray(data?.enrichedTransactions)
+          ? data.enrichedTransactions
+          : []
+      }
+    };
+  } catch (err) {
+    if (isTaggedPlaidFailure(err)) {
+      return {
+        ok: false,
+        kind: "plaid_error",
+        code: "plaid_enrichment_failed",
+        status: 502
+      };
+    }
+    if (err.isResolutionError) {
+      return {
+        ok: false,
+        kind: "plaid_error",
+        code: err.body?.code || "plaid_enrichment_failed",
+        status: err.status
+      };
+    }
+    return {
+      ok: false,
+      kind: "outage",
+      code: "internal_api_unavailable",
+      status: 503,
+      isTimeout: Boolean(err.isTimeout)
+    };
+  }
+};
+
+// Discriminated union return shape (mirrors checkAndIncrementRateLimit):
+//   { ok: true, data: { allowed, callsRemainingToday, dailyLimit, resetAtIso } }
+//   { ok: false, kind: "denied", code, status }
+//   { ok: false, kind: "outage", code, status, isTimeout }
+const checkAndIncrementToolCounter = async ({
+  companyId,
+  keyId,
+  toolName,
+  dailyLimit
+}) => {
+  try {
+    const data = await request({
+      method: "POST",
+      path: "/api/v1/mcp-tools/check-and-increment-tool-counter",
+      body: { companyId, keyId, toolName, dailyLimit }
+    });
+    return {
+      ok: true,
+      data: {
+        allowed: Boolean(data?.allowed),
+        callsRemainingToday:
+          typeof data?.callsRemainingToday === "number"
+            ? data.callsRemainingToday
+            : 0,
+        dailyLimit:
+          typeof data?.dailyLimit === "number" ? data.dailyLimit : null,
+        resetAtIso:
+          typeof data?.resetAtIso === "string" ? data.resetAtIso : null
+      }
+    };
+  } catch (err) {
+    if (err.isResolutionError) {
+      return {
+        ok: false,
+        kind: "denied",
+        code: err.body?.code || "invalid_input",
+        status: err.status
+      };
+    }
+    return {
+      ok: false,
+      kind: "outage",
+      code: "internal_api_unavailable",
+      status: 503,
+      isTimeout: Boolean(err.isTimeout)
+    };
+  }
+};
+
 export {
   resolveApiKey,
   getToolRegistry,
   checkAndIncrementRateLimit,
   checkAndIncrementIpCounter,
   recordStoredResult,
-  recordAuditLogEntry
+  recordAuditLogEntry,
+  enrichPlaidTransactions,
+  checkAndIncrementToolCounter
 };
