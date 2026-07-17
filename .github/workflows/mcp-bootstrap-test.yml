@@ -35,7 +35,19 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Tool-parity + smoke tests (mcp-server, self-contained)
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v3
+
+      - name: Inject secrets via Doppler
+        uses: dopplerhq/secrets-fetch-action@v1.2.0
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN }}
+          inject-env-vars: true
+
+      - name: Configure npm auth (private @aclymatepackages/* scope)
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+
+      - name: Tool-parity + smoke tests (mcp-server)
         run: npm ci && npm test
         working-directory: mcp-server
 
@@ -55,15 +67,6 @@ jobs:
           ref: mcp
           path: internal-mcp
           token: ${{ steps.internal-app-token.outputs.token }}
-
-      - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@v3
-
-      - name: Inject secrets via Doppler
-        uses: dopplerhq/secrets-fetch-action@v1.2.0
-        with:
-          doppler-token: ${{ secrets.DOPPLER_TOKEN }}
-          inject-env-vars: true
 
       - name: Install internal/functions dependencies
         run: npm ci
