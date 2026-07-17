@@ -4,10 +4,14 @@ concurrency:
   group: mcp-bootstrap-test-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
       - "claude/**"
+      - "plugin/**"
       - "openai/**"
       - "gemini/**"
       - ".github/workflows/mcp-bootstrap-test.yml"
@@ -15,6 +19,7 @@ on:
     branches: [mcp]
     paths:
       - "claude/**"
+      - "plugin/**"
       - "openai/**"
       - "gemini/**"
       - ".github/workflows/mcp-bootstrap-test.yml"
@@ -73,7 +78,12 @@ jobs:
         working-directory: internal-mcp/functions
 
       - name: Run bootstrap-hit-rate gate
-        run: node scripts/report-bootstrap-run.js --gate="${GATE_OVERRIDE:-0.5}"
+        run: |
+          if [ -n "$GATE_OVERRIDE" ]; then
+            node scripts/report-bootstrap-run.js --gate="$GATE_OVERRIDE"
+          else
+            node scripts/report-bootstrap-run.js
+          fi
         working-directory: internal-mcp/functions
         env:
           GATE_OVERRIDE: ${{ github.event.inputs.gate }}
