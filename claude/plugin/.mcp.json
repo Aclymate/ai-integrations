@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "aclymate": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://mcp.aclymate.com/mcp"]
-    }
-  }
-}
