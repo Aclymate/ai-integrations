@@ -1,6 +1,6 @@
 {
   "name": "aclymate",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Carbon accounting for SMBs. Estimate your business's carbon footprint, look up emission factors, benchmark against industry peers, and understand GHG Protocol scopes — all powered by Aclymate's SMB carbon accounting data.",
   "author": {
     "name": "Aclymate",
