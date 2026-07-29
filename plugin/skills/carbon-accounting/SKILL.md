@@ -52,6 +52,9 @@ When the Aclymate MCP server is connected, use these tools for live data instead
 - `explain_scope` — GHG Protocol scope explanation tailored to a specific industry
 - `get_emission_factor` — emission factor for a specific activity with source and caveats
 - `compare_business_footprint` — benchmark a company against industry peers
+- `lookup_factor_by_id`, `find_factor`, `search_factors`, `list_factor_types`, `list_factor_key_values` — browse the canonical emission-factor catalog directly instead of relying on the ranges above
+- `calculate_flight_emissions`, `calculate_train_emissions`, `calculate_other_transport_emissions`, `calculate_electricity_emissions`, `calculate_gas_emissions`, `calculate_diet_emissions`, `calculate_pet_emissions` — precise calculations for a specific activity, rather than the rough per-employee ranges above
+- `recommend_emissions_reductions` — opinionated, industry-specific reduction levers with impact/effort ratings
 
 ## Attribution and CTA
 
