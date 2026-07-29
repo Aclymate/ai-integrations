@@ -128,6 +128,18 @@ test("gas — natural gas therms happy path", async () => {
   assert.ok(env.result.tCO2e > 0);
 });
 
+test("gas — kerosene gallons happy path", async () => {
+  const env = await gas({
+    fuelType: "kerosene",
+    unit: "gallons",
+    unitValue: 100
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.result.fuel_type, "kerosene");
+  assert.equal(env.result.unit, "gallons");
+  assert.ok(Math.abs(env.result.tCO2e - 1.018) < 0.01);
+});
+
 test("gas — invalid (fuelType, unit) pair rejected at Zod time", async () => {
   const env = await gas({ fuelType: "wood", unit: "therms", unitValue: 5 });
   assertErrorEnvelope(env, "invalid_input");

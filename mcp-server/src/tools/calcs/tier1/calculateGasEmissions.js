@@ -23,7 +23,8 @@ const DEFAULT_UNIT_FOR_FUEL = {
   naturalGas: "therms",
   propane: "gallons",
   heatingOil: "gallons",
-  wood: "cords"
+  wood: "cords",
+  kerosene: "gallons"
 };
 
 const buildFuelBranch = (fuelType) => {
@@ -51,7 +52,7 @@ const inputShape = {
   unit: z
     .string()
     .describe(
-      "Unit for the fuel. naturalGas: therms|mcf|ccf|scf|cubicMeters (default therms). propane: scf|gallons (default gallons). heatingOil: gallons. wood: cords."
+      "Unit for the fuel. naturalGas: therms|mcf|ccf|scf|cubicMeters (default therms). propane: scf|gallons (default gallons). heatingOil: gallons. wood: cords. kerosene: gallons."
     ),
   unitValue: z
     .number()
@@ -64,7 +65,7 @@ const definition = {
   name: "calculate_gas_emissions",
   title: "Calculate Gas Emissions",
   description:
-    "Calculate tCO2e for combustion of natural gas, propane, heating oil, or wood using EPA stationary-combustion factors. `fuelType` and `unitValue` are required; the accepted `unit` depends on the fuel: naturalGas → therms|mcf|ccf|scf|cubicMeters; propane → scf|gallons; heatingOil → gallons; wood → cords. Invalid (fuelType, unit) pairs are rejected at parse time — no silent passthrough."
+    "Calculate tCO2e for combustion of natural gas, propane, heating oil, wood, or kerosene using EPA stationary-combustion factors. `fuelType` and `unitValue` are required; the accepted `unit` depends on the fuel: naturalGas → therms|mcf|ccf|scf|cubicMeters; propane → scf|gallons; heatingOil → gallons; wood → cords; kerosene → gallons. Invalid (fuelType, unit) pairs are rejected at parse time — no silent passthrough."
 };
 
 const buildValidationError = (parsed) =>
