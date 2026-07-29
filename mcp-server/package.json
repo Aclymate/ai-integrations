@@ -14,7 +14,7 @@
     "test:recommend-emissions-reductions": "node scripts/recommend-emissions-reductions-test-harness.js"
   },
   "dependencies": {
-    "@aclymatepackages/calcs": "^8.3.0",
+    "@aclymatepackages/calcs": "^8.4.1",
     "@aclymatepackages/emissions-factors": "^1.8.0",
     "@aclymatepackages/lists": "^1.7.6",
     "@aclymatepackages/mcp-envelope-codes": "^0.3.1",
