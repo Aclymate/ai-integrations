@@ -1,0 +1,42 @@
+# Manual deploy build for aclymate-mcp. The Dockerfile needs NPM_PUBLISH_TOKEN
+# at build time to resolve private @aclymatepackages/* transitive dependencies
+# (e.g. @aclymatepackages/other-helpers, pulled in by @aclymatepackages/calcs) —
+# npm ci 404s against the public registry without it. The token is passed as a
+# Docker build-arg only into the discarded `deps` build stage; it never lands
+# in the final image's layers.
+#
+# Run from mcp-server/:
+#   gcloud builds submit --config=cloudbuild.yaml --project aclymate-internal --region us-central1 .
+#
+# Then deploy the built image, e.g. as a tagged no-traffic revision for testing:
+#   gcloud run deploy aclymate-mcp \
+#     --image=us-central1-docker.pkg.dev/aclymate-internal/cloud-run-source-deploy/aclymate-mcp:<tag> \
+#     --project aclymate-internal --region us-central1 \
+#     --no-traffic --tag=<tag> \
+#     --set-env-vars RENEW_WEST_INTERNAL_API_URL=<url>,RENEW_WEST_INTERNAL_API_AUDIENCE=<url> \
+#     --set-secrets INTERNAL_API_KEY=aclymate-mcp-internal-api-key:latest,MCP_IP_HASH_SALT=aclymate-mcp-ip-hash-salt:latest
+#
+# NPM_PUBLISH_TOKEN is read from Secret Manager (aclymate-mcp-npm-publish-token,
+# sourced from Doppler's aclymate-internal/dev NPM_PUBLISH_TOKEN). The Cloud
+# Build service account needs roles/secretmanager.secretAccessor on it — already
+# granted to both 933878544994@cloudbuild.gserviceaccount.com and
+# 933878544994-compute@developer.gserviceaccount.com as of 2026-08-20.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        docker build \
+          --build-arg NPM_PUBLISH_TOKEN="$$NPM_PUBLISH_TOKEN" \
+          -t us-central1-docker.pkg.dev/aclymate-internal/cloud-run-source-deploy/aclymate-mcp \
+          .
+    secretEnv: ['NPM_PUBLISH_TOKEN']
+images:
+  - 'us-central1-docker.pkg.dev/aclymate-internal/cloud-run-source-deploy/aclymate-mcp'
+availableSecrets:
+  secretManager:
+    - versionName: projects/aclymate-internal/secrets/aclymate-mcp-npm-publish-token/versions/latest
+      env: 'NPM_PUBLISH_TOKEN'
+options:
+  logging: CLOUD_LOGGING_ONLY
