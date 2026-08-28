@@ -156,6 +156,99 @@ describe("handler — success mapping", () => {
       assert.equal(Object.prototype.hasOwnProperty.call(tx, "plaidRequestId"), false);
       assert.equal(env.sources[0].name, "Plaid transactionsEnrich");
       assert.equal(env.confidence, "high");
+      assert.equal(env.warnings.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  // Regression guard: renew-west's non-production Plaid Enrich short-circuit
+  // (sandbox rejects non-canned descriptions) returns transactions with no
+  // vendor/location/personal_finance_category at all — only flowType. Before
+  // this fix the handler reported confidence:"high" with no warnings on this
+  // exact shape, which reads as a clean success that quietly found nothing.
+  test("all transactions unenriched (no vendor/location/category): low confidence + enrichment_incomplete warning", async () => {
+    const restore = stubFetch(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          enrichedTransactions: [
+            {
+              description: "UNITED AIRLINES",
+              amount: 412.5,
+              direction: "OUTFLOW",
+              currencyCode: "USD",
+              flowType: "expense"
+            }
+          ]
+        })
+    }));
+    try {
+      const env = await handler({ transactions: [buildTransaction()] });
+      assert.equal(env.error, null);
+      const tx = env.result.transactions[0];
+      assert.equal(tx.vendor, null);
+      assert.equal(tx.location, null);
+      assert.equal(tx.personalFinanceCategory, null);
+      assert.equal(env.confidence, "low");
+      const warning = env.warnings.find((w) => w.code === "enrichment_incomplete");
+      assert.ok(warning, "expected an enrichment_incomplete warning");
+      assert.match(warning.message, /1 of 1/);
+    } finally {
+      restore();
+    }
+  });
+
+  test("mixed batch (one enriched, one not): medium confidence + warning names the count", async () => {
+    const restore = stubFetch(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          enrichedTransactions: [
+            {
+              description: "Whole Foods",
+              flowType: "expense",
+              location: { city: "Austin" },
+              personal_finance_category: { primary: "FOOD_AND_DRINK" },
+              vendor: { name: "Whole Foods Market" }
+            },
+            {
+              description: "UNITED AIRLINES",
+              flowType: "expense"
+            }
+          ]
+        })
+    }));
+    try {
+      const env = await handler({
+        transactions: [buildTransaction(), buildTransaction({ description: "United" })]
+      });
+      assert.equal(env.confidence, "medium");
+      const warning = env.warnings.find((w) => w.code === "enrichment_incomplete");
+      assert.ok(warning);
+      assert.match(warning.message, /1 of 2/);
+    } finally {
+      restore();
+    }
+  });
+
+  test("vendor present but an empty object still counts as unclassified", async () => {
+    const restore = stubFetch(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          enrichedTransactions: [
+            { description: "Mystery Charge", flowType: "expense", vendor: {} }
+          ]
+        })
+    }));
+    try {
+      const env = await handler({ transactions: [buildTransaction()] });
+      assert.equal(env.confidence, "low");
+      assert.ok(env.warnings.find((w) => w.code === "enrichment_incomplete"));
     } finally {
       restore();
     }
