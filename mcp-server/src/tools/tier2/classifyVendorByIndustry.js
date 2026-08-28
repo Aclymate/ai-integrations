@@ -26,7 +26,13 @@ const inputShape = {
     .string()
     .optional()
     .describe(
-      "The vendor's NAICS industry label if known (e.g. 'Software Publishers'). Improves classification accuracy — omit if unknown."
+      "The vendor's industry as a plain-language label matching Aclymate's internal taxonomy (e.g. 'Computer Software / Engineering', 'Restaurants') — NOT an official NAICS title ('Software Publishers' will not match). Prefer `naicsCode` when you have it; it matches exactly."
+    ),
+  naicsCode: z
+    .union([z.string(), z.number()])
+    .optional()
+    .describe(
+      "The vendor's 6-digit NAICS code if known (e.g. 511210). Matched exactly, unlike `industryHint` — use this when you have an official NAICS classification rather than guessing a label."
     )
 };
 
@@ -36,7 +42,7 @@ const definition = {
   name: "classify_vendor_by_industry",
   title: "Classify Vendor By Industry",
   description:
-    "Classify a vendor into an emissions category (spend-based NAICS classification) using Aclymate's industry data. Pass `industryHint` (a NAICS industry label) if you know it — this materially improves accuracy. Result is saved to the caller's Explorer dashboard."
+    "Classify a vendor into an emissions category (spend-based NAICS classification) using Aclymate's industry data. Pass `naicsCode` if you know the vendor's NAICS code — it's an exact match. Otherwise pass `industryHint` as a plain-language industry description; official NAICS titles will NOT match it, use `naicsCode` for those instead. Result is saved to the caller's Explorer dashboard."
 };
 
 const buildValidationError = (parsed) =>
@@ -54,22 +60,33 @@ const handler = async (rawParams) => {
   if (!parsed.success) {
     return buildValidationError(parsed);
   }
-  const { vendorName, industryHint } = parsed.data;
+  const { vendorName, industryHint, naicsCode } = parsed.data;
 
   const categoryData = findVendorEmissionCategoryData({
-    industry: industryHint ? { label: industryHint } : undefined
+    industry:
+      naicsCode || industryHint ? { label: industryHint, naicsCode } : undefined
   });
 
   const hasIndustryMatch = categoryData?.tonsCo2ePerDollar != null;
+
+  const describeAttempt = () => {
+    if (naicsCode) {
+      return `naicsCode "${naicsCode}"`;
+    }
+    if (industryHint) {
+      return `industryHint "${industryHint}"`;
+    }
+    return null;
+  };
 
   const warnings = hasIndustryMatch
     ? []
     : [
         {
           code: "no_industry_match",
-          message: industryHint
-            ? `No NAICS match found for industryHint "${industryHint}" — returning an unclassified result.`
-            : "No industryHint supplied — returning an unclassified result."
+          message: describeAttempt()
+            ? `No match found for ${describeAttempt()} — returning an unclassified result.`
+            : "No industryHint or naicsCode supplied — returning an unclassified result."
         }
       ];
 

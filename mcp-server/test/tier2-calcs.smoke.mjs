@@ -51,6 +51,53 @@ test("classify_vendor_by_industry — no industryHint: no_industry_match + low c
   assert.ok(env.warnings.find((w) => w.code === "no_industry_match"));
 });
 
+// Regression guard for the taxonomy-mismatch bug: industryHint matches
+// Aclymate's internal industry labels (PeopleDataLabs-derived), NOT official
+// NAICS titles — an official title like "Software Publishers" will not match,
+// even though it's the exact right answer for naicsCode 511210.
+test("classify_vendor_by_industry — official NAICS title does not match industryHint (documents the known taxonomy gap)", async () => {
+  const env = await classifyVendor({
+    vendorName: "Acme Software",
+    industryHint: "Software Publishers"
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "low");
+  assert.ok(env.warnings.find((w) => w.code === "no_industry_match"));
+});
+
+test("classify_vendor_by_industry — industryHint matching the real taxonomy label succeeds", async () => {
+  const env = await classifyVendor({
+    vendorName: "Acme Software",
+    industryHint: "Computer Software / Engineering"
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "high");
+  assert.equal(env.result.naicsCode, 511210);
+  assert.equal(env.warnings.length, 0);
+});
+
+test("classify_vendor_by_industry — naicsCode matches exactly, sidestepping the taxonomy gap", async () => {
+  const env = await classifyVendor({
+    vendorName: "Acme Software",
+    naicsCode: 511210
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "high");
+  assert.equal(env.result.naicsCode, 511210);
+  assert.equal(env.warnings.length, 0);
+});
+
+test("classify_vendor_by_industry — naicsCode takes precedence when both are supplied", async () => {
+  const env = await classifyVendor({
+    vendorName: "Acme Software",
+    industryHint: "Software Publishers", // would not match on its own
+    naicsCode: 511210
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "high");
+  assert.equal(env.result.naicsCode, 511210);
+});
+
 test("calculate_refrigerant_emissions — happy path", async () => {
   const env = await calcRefrigerant({ quantity: 10, unit: "lbs", refrigerantType: "r410a" });
   assertSuccessEnvelope(env);
