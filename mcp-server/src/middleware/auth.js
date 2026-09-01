@@ -17,6 +17,7 @@ const METERING_BYPASS_HEADER = "x-aclymate-metering-bypass";
 const MIN_METERING_BYPASS_SECRET_LENGTH = 16;
 
 const STATUS_FOR_CODE = {
+  malformed_auth_header: 401,
   invalid_api_key_format: 401,
   invalid_api_key: 401,
   revoked_api_key: 401,
@@ -24,6 +25,8 @@ const STATUS_FOR_CODE = {
 };
 
 const MESSAGE_FOR_CODE = {
+  malformed_auth_header:
+    "The Authorization header must use the 'Bearer <key>' scheme.",
   invalid_api_key_format: "Malformed API key.",
   invalid_api_key: "Invalid API key.",
   revoked_api_key: "This API key has been revoked.",
@@ -32,6 +35,15 @@ const MESSAGE_FOR_CODE = {
 };
 
 const hasScoutHeader = (req) => Boolean(req.headers?.[SCOUT_HEADER]);
+
+// A header that IS present but doesn't start with "Bearer " (a typo'd scheme,
+// e.g. "Bearr <key>") must be rejected distinctly from no header at all — a
+// caller holding a valid key shouldn't be told they need one. Checked before
+// extractBearerToken, which folds both cases into the same null return.
+const hasMalformedAuthHeader = (req) => {
+  const header = req.headers?.authorization;
+  return Boolean(header) && !header.startsWith(BEARER_HEADER_PREFIX);
+};
 
 const extractBearerToken = (req) => {
   const header = req.headers?.authorization || "";
@@ -117,6 +129,11 @@ const authMiddleware = async (req, res) => {
     }
     req.auth = buildScoutPlaceholderAuth(req);
     return { proceed: true };
+  }
+
+  if (hasMalformedAuthHeader(req)) {
+    denyResponse(res, "malformed_auth_header");
+    return { proceed: false };
   }
 
   const token = extractBearerToken(req);

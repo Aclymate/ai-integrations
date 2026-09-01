@@ -666,6 +666,78 @@ describe("Bypass header (auth.js) — meteringBypass wiring", () => {
   });
 });
 
+describe("Malformed Authorization header (auth.js) — distinct from no header", () => {
+  test("typo'd scheme (Bearr <key>): 401 malformed_auth_header, NOT missing_bearer_token", async () => {
+    const req = { headers: { authorization: "Bearr acy_live_tier3_abc" } };
+    const res = buildFakeRes();
+    const outcome = await authMiddleware(req, res);
+
+    assert.equal(outcome.proceed, false);
+    assert.equal(res._state.status, 401);
+    const body = JSON.parse(res._state.body);
+    assert.equal(body.error.code, "malformed_auth_header");
+    assert.notEqual(body.error.code, "missing_bearer_token");
+    assert.equal(req.auth, undefined, "req.auth must not be set on rejection");
+  });
+
+  test("no Authorization header at all: still anonymous (regression guard — must stay distinct from the malformed case above)", async () => {
+    const req = { headers: {} };
+    const res = buildFakeRes();
+    const outcome = await authMiddleware(req, res);
+
+    assert.equal(outcome.proceed, true);
+    assert.equal(req.auth.tier, "tier-1");
+    assert.equal(res._state.status, null, "no response should be written");
+  });
+
+  test("well-formed Bearer header still authenticates normally (regression guard)", async () => {
+    const restore = stubFetch(async () =>
+      jsonFetchResponse({
+        accountId: "company-1",
+        tier: "tier-3",
+        keyId: "key-1",
+        testMode: false,
+        rateLimit: 5000
+      })
+    );
+    try {
+      const req = { headers: { authorization: "Bearer acy_live_tier3_abc" } };
+      const res = buildFakeRes();
+      const outcome = await authMiddleware(req, res);
+
+      assert.equal(outcome.proceed, true);
+      assert.equal(req.auth.tier, "tier-3");
+      assert.equal(res._state.status, null);
+    } finally {
+      restore();
+    }
+  });
+
+  test("scout header still wins over a malformed Authorization header (regression guard)", async () => {
+    const req = {
+      headers: {
+        "x-aclymate-scout-auth": "1",
+        authorization: "Bearr acy_live_tier3_abc"
+      }
+    };
+    const res = buildFakeRes();
+    const outcome = await authMiddleware(req, res);
+
+    assert.equal(outcome.proceed, true);
+    assert.equal(req.auth.pendingScoutAuth, true);
+    assert.equal(res._state.status, null);
+  });
+
+  test("empty Authorization header value: treated as no header, not malformed", async () => {
+    const req = { headers: { authorization: "" } };
+    const res = buildFakeRes();
+    const outcome = await authMiddleware(req, res);
+
+    assert.equal(outcome.proceed, true);
+    assert.equal(req.auth.tier, "tier-1");
+  });
+});
+
 describe("Concurrency", () => {
   test("50 parallel requests: no thrown exceptions, sum(200s)+sum(429s)===50, internalApi called exactly 50 times", async () => {
     let callCount = 0;
