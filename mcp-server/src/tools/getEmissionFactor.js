@@ -84,12 +84,23 @@ const callClimateBrainFallback = async ({ activity, unit }) => {
   });
 };
 
-const buildCanonicalHitEnvelope = ({ match, disambiguation_hint, activity }) => {
+const buildCanonicalHitEnvelope = ({
+  match,
+  disambiguation_hint,
+  activity,
+  usedFuzzyMatch
+}) => {
   const disambiguationList =
     disambiguation_hint && disambiguation_hint.length > 0
       ? disambiguation_hint
       : null;
   const warnings = [];
+  if (usedFuzzyMatch) {
+    warnings.push({
+      code: WARNING_CODES.FUZZY_MATCH,
+      message: `No exact match for '${activity}' — matched '${match.factor_id}' via fuzzy token overlap instead. Verify this is the intended factor.`
+    });
+  }
   if (disambiguationList) {
     warnings.push({
       code: WARNING_CODES.DISAMBIGUATION_HINT,
@@ -108,6 +119,11 @@ const buildCanonicalHitEnvelope = ({ match, disambiguation_hint, activity }) => 
       message: `Canonical factor '${match.factor_id}' matched but has no source metadata in the catalog.`
     });
   }
+  const confidence = isEmptyValueBlock(match)
+    ? "low"
+    : usedFuzzyMatch
+      ? "medium"
+      : "high";
   return buildSuccessEnvelope({
     result: {
       factor_id: match.factor_id,
@@ -118,7 +134,7 @@ const buildCanonicalHitEnvelope = ({ match, disambiguation_hint, activity }) => 
       disambiguation_hint: disambiguationList
     },
     sources: match.source ? [match.source] : [],
-    confidence: isEmptyValueBlock(match) ? "low" : "high",
+    confidence,
     warnings,
     factorSnapshot: FACTOR_SNAPSHOT,
     upgradeHint: null
@@ -172,7 +188,8 @@ const handler = async (rawParams) => {
     return buildCanonicalHitEnvelope({
       match: lookupResult.match,
       disambiguation_hint: lookupResult.disambiguation_hint,
-      activity
+      activity,
+      usedFuzzyMatch: Boolean(lookupResult.used_fuzzy_match)
     });
   }
 
