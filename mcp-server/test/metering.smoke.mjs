@@ -18,7 +18,9 @@ const {
   buildIpDailyCapEnvelope,
   STATUS_FOR_CODE
 } = await import("../src/middleware/metering.js");
-const { authMiddleware } = await import("../src/middleware/auth.js");
+const { authMiddleware, authMiddlewareForJsonRpc } = await import(
+  "../src/middleware/auth.js"
+);
 const { __setRegistryForTests } = await import("../src/toolRegistry.js");
 
 const pending = [];
@@ -735,6 +737,87 @@ describe("Malformed Authorization header (auth.js) — distinct from no header",
 
     assert.equal(outcome.proceed, true);
     assert.equal(req.auth.tier, "tier-1");
+  });
+});
+
+describe("authMiddlewareForJsonRpc (auth.js) — /mcp auth failures as JSON-RPC, not raw HTTP", () => {
+  // StreamableHTTPClientTransport only special-cases HTTP 401 when the client has an
+  // OAuth authProvider wired up (irrelevant to our static bearer scheme) — otherwise a
+  // non-2xx to /mcp just throws client-side, and most MCP client UIs (Claude Desktop via
+  // mcp-remote) surface that as a bare "Server disconnected" with no readable reason.
+  // Regression guard: an auth failure on /mcp must come back as HTTP 200 with a
+  // JSON-RPC-shaped error, the same shape the client already knows how to parse and
+  // reject cleanly — not Aclymate's own REST envelope, and not a non-2xx status.
+  test("malformed scheme: HTTP 200, JSON-RPC error shape, not the REST envelope", async () => {
+    const req = { headers: { authorization: "Bearr acy_live_tier3_abc" } };
+    const res = buildFakeRes();
+    const outcome = await authMiddlewareForJsonRpc(req, res);
+
+    assert.equal(outcome.proceed, false);
+    assert.equal(res._state.status, 200);
+    const body = JSON.parse(res._state.body);
+    assert.equal(body.jsonrpc, "2.0");
+    assert.equal(body.id, null);
+    assert.equal(typeof body.error.code, "number");
+    assert.match(body.error.message, /Bearer/);
+    assert.equal(body.error.data.aclymate_code, "malformed_auth_header");
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "attribution"), false);
+  });
+
+  test("well-formed but nonexistent key: still HTTP 200 with a JSON-RPC error, not 401", async () => {
+    const restore = stubFetch(async () => ({
+      ok: false,
+      status: 401,
+      text: async () => JSON.stringify({ error: true })
+    }));
+    try {
+      const req = { headers: { authorization: "Bearer acy_live_tier3_doesnotexist" } };
+      const res = buildFakeRes();
+      const outcome = await authMiddlewareForJsonRpc(req, res);
+
+      assert.equal(outcome.proceed, false);
+      assert.equal(res._state.status, 200);
+      const body = JSON.parse(res._state.body);
+      assert.equal(body.jsonrpc, "2.0");
+      assert.equal(body.error.data.aclymate_code, "invalid_api_key");
+    } finally {
+      restore();
+    }
+  });
+
+  test("valid key still authenticates normally through the jsonrpc-wrapped middleware", async () => {
+    const restore = stubFetch(async () =>
+      jsonFetchResponse({
+        accountId: "company-1",
+        tier: "tier-3",
+        keyId: "key-1",
+        testMode: false,
+        rateLimit: 5000
+      })
+    );
+    try {
+      const req = { headers: { authorization: "Bearer acy_live_tier3_real" } };
+      const res = buildFakeRes();
+      const outcome = await authMiddlewareForJsonRpc(req, res);
+
+      assert.equal(outcome.proceed, true);
+      assert.equal(req.auth.tier, "tier-3");
+      assert.equal(res._state.status, null);
+    } finally {
+      restore();
+    }
+  });
+
+  test("the default authMiddleware (REST routes) is unaffected — still the Aclymate envelope at its real status", async () => {
+    const req = { headers: { authorization: "Bearr acy_live_tier3_abc" } };
+    const res = buildFakeRes();
+    const outcome = await authMiddleware(req, res);
+
+    assert.equal(outcome.proceed, false);
+    assert.equal(res._state.status, 401);
+    const body = JSON.parse(res._state.body);
+    assert.equal(body.error.code, "malformed_auth_header");
+    assert.equal(body.jsonrpc, undefined);
   });
 });
 

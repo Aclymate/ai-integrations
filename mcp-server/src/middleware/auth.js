@@ -110,6 +110,30 @@ const denyResponse = (res, code) => {
   );
 };
 
+// A real HTTP 401/503 here works for our own REST routes (Aclymate's envelope shape),
+// but for /mcp it kills the connection before the MCP protocol layer ever starts — the
+// StreamableHTTPClientTransport only special-cases 401 when the client is configured
+// with an OAuth authProvider (irrelevant to our static bearer scheme); otherwise it just
+// throws and most MCP client UIs (Claude Desktop via mcp-remote) surface that as a bare
+// "Server disconnected", not a readable message, because the auth failure never took the
+// shape of a JSON-RPC response the client already knows how to parse and reject cleanly.
+// Sending 200 with a JSON-RPC error object routes it through that same, already-working
+// code path instead. id is always null: this rejection happens before parseBody, by
+// design, so we never learn the request's real id.
+const AUTH_FAILURE_JSONRPC_CODE = -32010;
+
+const denyJsonRpc = (res, code) => {
+  sendJson(res, 200, {
+    jsonrpc: "2.0",
+    id: null,
+    error: {
+      code: AUTH_FAILURE_JSONRPC_CODE,
+      message: MESSAGE_FOR_CODE[code] || "Authentication failed.",
+      data: { aclymate_code: code }
+    }
+  });
+};
+
 const resolveBearerAuth = async (token, req) => {
   const result = await resolveApiKey(token);
   if (result.ok) {
@@ -118,7 +142,9 @@ const resolveBearerAuth = async (token, req) => {
   return result;
 };
 
-const authMiddleware = async (req, res) => {
+const authMiddleware = async (req, res, { protocol = "envelope" } = {}) => {
+  const deny = protocol === "jsonrpc" ? denyJsonRpc : denyResponse;
+
   if (hasScoutHeader(req)) {
     if (req.headers?.authorization) {
       emitStructuredWarning({
@@ -132,7 +158,7 @@ const authMiddleware = async (req, res) => {
   }
 
   if (hasMalformedAuthHeader(req)) {
-    denyResponse(res, "malformed_auth_header");
+    deny(res, "malformed_auth_header");
     return { proceed: false };
   }
 
@@ -155,16 +181,23 @@ const authMiddleware = async (req, res) => {
       event: "internal_api_outage_on_authenticated_request",
       isTimeout: Boolean(result.isTimeout)
     });
-    denyResponse(res, "internal_api_unavailable");
+    deny(res, "internal_api_unavailable");
     return { proceed: false };
   }
 
-  denyResponse(res, result.code);
+  deny(res, result.code);
   return { proceed: false };
 };
 
+// /mcp needs auth failures shaped as a JSON-RPC response (see denyJsonRpc) instead of
+// Aclymate's REST envelope — bound here so handleMcpRoute can drop it straight into
+// withMiddleware(...) alongside every other middleware, which only ever calls (req, res).
+const authMiddlewareForJsonRpc = (req, res) =>
+  authMiddleware(req, res, { protocol: "jsonrpc" });
+
 export {
   authMiddleware,
+  authMiddlewareForJsonRpc,
   resolveBearerAuth,
   UPGRADE_HINT_URL,
   STATUS_FOR_CODE,
