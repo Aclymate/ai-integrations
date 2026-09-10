@@ -26,7 +26,7 @@ import { handler as calcDiet } from "./tools/calcs/tier1/calculateDietEmissions.
 import { handler as calcPet } from "./tools/calcs/tier1/calculatePetEmissions.js";
 // B-Tier1-recommender — 1 tool
 import { handler as recommendReductions } from "./tools/recommender/recommendEmissionsReductions.js";
-import { authMiddleware } from "./middleware/auth.js";
+import { authMiddleware, authMiddlewareForJsonRpc } from "./middleware/auth.js";
 import { detectSourceAgent } from "./middleware/sourceAgent.js";
 import { runAudited } from "./middleware/audit.js";
 import { enforceMeteringForRest } from "./middleware/metering.js";
@@ -237,7 +237,7 @@ const handleRestRoute = async (req, res, route) => {
 // per-request auth/req is lost — stale/null/cross-request. Do NOT do that
 // without also passing auth explicitly through the SDK's extra.authInfo.
 const handleMcpRoute = async (req, res) => {
-  const chain = withMiddleware(authMiddleware);
+  const chain = withMiddleware(authMiddlewareForJsonRpc);
   const outcome = await chain(req, res);
   if (!outcome?.proceed) {
     return;
