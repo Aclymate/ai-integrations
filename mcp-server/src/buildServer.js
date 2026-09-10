@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { loosenSchemaForRegistration } from "./loosenSchemaForRegistration.js";
 // Phase A — 4 tools (all envelope-migrated by B-Tier1-browse)
 import {
   definition as explainScopeDef,
@@ -202,7 +203,7 @@ const registerEnvelopeTool = (
   server.tool(
     definition.name,
     definition.description,
-    inputShape,
+    loosenSchemaForRegistration(inputShape),
     { title: definition.title, readOnlyHint: true },
     withAudit(
       definition.name,
@@ -247,7 +248,7 @@ const registerCustomerDataTool = (
   server.tool(
     definition.name,
     definition.description,
-    inputShape,
+    loosenSchemaForRegistration(inputShape),
     { title: definition.title, readOnlyHint: true },
     withAudit(
       definition.name,
