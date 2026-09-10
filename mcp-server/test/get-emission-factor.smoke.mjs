@@ -95,6 +95,58 @@ test("get_emission_factor — canonical hit with disambiguation_hint emits DISAM
   });
 });
 
+test("get_emission_factor — fuzzy match emits FUZZY_MATCH warning and downgrades confidence to medium", async () => {
+  const mockFetch = async (url) => {
+    if (url === FACTORS_LOOKUP_URL) {
+      return jsonResponse({
+        match: {
+          factor_id: "flight-short-haul",
+          factor_type: "flight",
+          value: 0.15,
+          units: "kg CO2e per passenger-km",
+          source: { name: "DEFRA", vintage_year: 2024 },
+          package_version: "1.8.1"
+        },
+        used_fuzzy_match: true
+      });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  await withMockedFetch(mockFetch, async () => {
+    const env = await getEmissionFactor({ activity: "short-haul flight" });
+    assertSuccessEnvelope(env);
+    assert.equal(env.result.factor_id, "flight-short-haul");
+    assert.equal(env.confidence, "medium");
+    const warning = env.warnings.find((w) => w.code === "fuzzy_match");
+    assert.ok(warning, "expected a fuzzy_match warning");
+    assert.match(warning.message, /flight-short-haul/);
+  });
+});
+
+test("get_emission_factor — exact match (used_fuzzy_match absent) stays high confidence, no fuzzy warning", async () => {
+  const mockFetch = async (url) => {
+    if (url === FACTORS_LOOKUP_URL) {
+      return jsonResponse({
+        match: {
+          factor_id: "egrid-us-2024",
+          factor_type: "egrid",
+          value: 852.3,
+          units: "g CO2/kWh",
+          source: { name: "EPA eGRID", vintage_year: 2024 },
+          package_version: "1.8.1"
+        }
+      });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  await withMockedFetch(mockFetch, async () => {
+    const env = await getEmissionFactor({ activity: "US national average" });
+    assertSuccessEnvelope(env);
+    assert.equal(env.confidence, "high");
+    assert.equal(env.warnings.length, 0);
+  });
+});
+
 test("get_emission_factor — Climate Brain fallback returns low-confidence envelope + CLIMATE_BRAIN_FALLBACK warning", async () => {
   const mockFetch = async (url) => {
     if (url === FACTORS_LOOKUP_URL) {
