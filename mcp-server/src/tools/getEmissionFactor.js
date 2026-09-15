@@ -8,6 +8,7 @@ import {
   ERROR_CODES
 } from "../responseEnvelope.js";
 import { FACTOR_SNAPSHOT } from "./browse/factorSnapshot.js";
+import { convertValueUnit } from "./unitConversion.js";
 
 const inputShape = {
   activity: z
@@ -20,7 +21,7 @@ const inputShape = {
     .string()
     .optional()
     .describe(
-      "The unit you want the factor in (e.g. 'per mile', 'per kWh', 'per kg', 'per night'). Optional — if omitted, the most common unit is returned."
+      "Convert the factor's denominator to a different unit in the same dimension — distance (e.g. 'per mile' <-> 'per km'), energy ('per kWh' <-> 'per MWh' <-> 'per GWh'), or mass ('per kg' <-> 'per lb'). Optional — if omitted, or if the requested unit isn't a same-dimension match for this factor (e.g. asking a per-gallon fuel factor for 'per mile'), the catalog's native unit is returned instead, with a warning in that second case."
     )
 };
 
@@ -54,14 +55,48 @@ const isEmptyValueBlock = (match) => {
   return noScalar && noMap;
 };
 
-const buildValueBlock = (match) => {
+// Merges per-key conversion outcomes into one status for the whole value block: if any
+// key couldn't be converted, the caller must warn (never silently return a partial
+// conversion as if the whole request succeeded); "converted" only when every attempted
+// key actually changed; "already_native" when every key was already the requested unit.
+const mergeConversionStatuses = (statuses) => {
+  if (statuses.some((s) => s === "incompatible")) return "incompatible";
+  if (statuses.some((s) => s === "converted")) return "converted";
+  if (statuses.every((s) => s === "already_native")) return "already_native";
+  return "incompatible";
+};
+
+const buildValueBlock = (match, requestedUnit) => {
   if (typeof match.value === "number" && match.units) {
-    return { value: match.value, units: match.units };
+    if (!requestedUnit) return { block: { value: match.value, units: match.units }, conversionStatus: null };
+    const result = convertValueUnit(match.value, match.units, requestedUnit);
+    if (result.status === "converted") {
+      return { block: { value: result.value, units: result.unit }, conversionStatus: "converted" };
+    }
+    return { block: { value: match.value, units: match.units }, conversionStatus: result.status };
   }
   if (match.values && typeof match.values === "object") {
-    return { values: match.values, units: match.units ?? null };
+    if (!requestedUnit) {
+      return { block: { values: match.values, units: match.units ?? null }, conversionStatus: null };
+    }
+    const values = {};
+    const units = {};
+    const statuses = [];
+    Object.entries(match.values).forEach(([key, value]) => {
+      const unitStr = match.units?.[key];
+      const result = convertValueUnit(value, unitStr, requestedUnit);
+      statuses.push(result.status);
+      if (result.status === "converted") {
+        values[key] = result.value;
+        units[key] = result.unit;
+      } else {
+        values[key] = value;
+        units[key] = unitStr;
+      }
+    });
+    return { block: { values, units }, conversionStatus: mergeConversionStatuses(statuses) };
   }
-  return { value: null, units: match.units ?? null };
+  return { block: { value: null, units: match.units ?? null }, conversionStatus: null };
 };
 
 const buildSourceBlock = (source) => {
@@ -88,12 +123,14 @@ const buildCanonicalHitEnvelope = ({
   match,
   disambiguation_hint,
   activity,
-  usedFuzzyMatch
+  usedFuzzyMatch,
+  requestedUnit
 }) => {
   const disambiguationList =
     disambiguation_hint && disambiguation_hint.length > 0
       ? disambiguation_hint
       : null;
+  const { block: valueBlock, conversionStatus } = buildValueBlock(match, requestedUnit);
   const warnings = [];
   if (usedFuzzyMatch) {
     warnings.push({
@@ -119,6 +156,12 @@ const buildCanonicalHitEnvelope = ({
       message: `Canonical factor '${match.factor_id}' matched but has no source metadata in the catalog.`
     });
   }
+  if (conversionStatus === "incompatible") {
+    warnings.push({
+      code: WARNING_CODES.UNIT_NOT_CONVERTIBLE,
+      message: `Requested unit '${requestedUnit}' isn't a supported conversion for '${match.factor_id}' — returning the catalog's native unit instead. Only same-dimension conversions (distance, energy, or mass) are supported; this factor's denominator can't be safely converted to what you asked for.`
+    });
+  }
   const confidence = isEmptyValueBlock(match)
     ? "low"
     : usedFuzzyMatch
@@ -129,7 +172,7 @@ const buildCanonicalHitEnvelope = ({
       factor_id: match.factor_id,
       factor_type: match.factor_type,
       activity,
-      value_block: buildValueBlock(match),
+      value_block: valueBlock,
       source_block: buildSourceBlock(match.source),
       disambiguation_hint: disambiguationList
     },
@@ -189,7 +232,8 @@ const handler = async (rawParams) => {
       match: lookupResult.match,
       disambiguation_hint: lookupResult.disambiguation_hint,
       activity,
-      usedFuzzyMatch: Boolean(lookupResult.used_fuzzy_match)
+      usedFuzzyMatch: Boolean(lookupResult.used_fuzzy_match),
+      requestedUnit: unit
     });
   }
 

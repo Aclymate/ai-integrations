@@ -277,6 +277,82 @@ test("get_emission_factor — canonical hit with missing source emits MISSING_SO
   });
 });
 
+test("get_emission_factor — unit param converts a compatible denominator (per-km -> per-mile)", async () => {
+  const mockFetch = async (url) => {
+    if (url === FACTORS_LOOKUP_URL) {
+      return jsonResponse({
+        match: {
+          factor_id: "flight-short-haul",
+          factor_type: "flight",
+          values: {
+            kg_co2_per_passenger_km: 0.25355,
+            g_ch4_per_passenger_km: 0.00012,
+            g_n2o_per_passenger_km: 0.00126
+          },
+          units: {
+            kg_co2_per_passenger_km: "kg CO2/passenger-km",
+            g_ch4_per_passenger_km: "g CH4/passenger-km",
+            g_n2o_per_passenger_km: "g N2O/passenger-km"
+          },
+          source: { name: "DEFRA", vintage_year: 2024 },
+          package_version: "1.9.1"
+        }
+      });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  await withMockedFetch(mockFetch, async () => {
+    const env = await getEmissionFactor({
+      activity: "short-haul flight",
+      unit: "per mile"
+    });
+    assertSuccessEnvelope(env);
+    assert.equal(
+      env.result.value_block.units.kg_co2_per_passenger_km,
+      "kg CO2/passenger-mile"
+    );
+    assert.ok(
+      Math.abs(
+        env.result.value_block.values.kg_co2_per_passenger_km - 0.25355 * 1.609344
+      ) < 1e-9
+    );
+    assert.equal(
+      env.warnings.find((w) => w.code === "unit_not_convertible"),
+      undefined
+    );
+  });
+});
+
+test("get_emission_factor — unit param that can't be safely converted emits UNIT_NOT_CONVERTIBLE and keeps the native value", async () => {
+  const mockFetch = async (url) => {
+    if (url === FACTORS_LOOKUP_URL) {
+      return jsonResponse({
+        match: {
+          factor_id: "fuel-diesel",
+          factor_type: "fuel",
+          values: { kg_co2_per_unit: 10.21 },
+          units: { kg_co2_per_unit: "kg CO2/gallon" },
+          source: { name: "EPA", vintage_year: 2024 },
+          package_version: "1.9.1"
+        }
+      });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  await withMockedFetch(mockFetch, async () => {
+    const env = await getEmissionFactor({
+      activity: "diesel fuel",
+      unit: "per mile"
+    });
+    assertSuccessEnvelope(env);
+    assert.equal(env.result.value_block.values.kg_co2_per_unit, 10.21);
+    assert.equal(env.result.value_block.units.kg_co2_per_unit, "kg CO2/gallon");
+    const warning = env.warnings.find((w) => w.code === "unit_not_convertible");
+    assert.ok(warning, "expected an unit_not_convertible warning");
+    assert.match(warning.message, /fuel-diesel/);
+  });
+});
+
 test("get_emission_factor — Climate Brain returns empty string → treated as outage (503 error envelope)", async () => {
   const mockFetch = async (url) => {
     if (url === FACTORS_LOOKUP_URL) {
