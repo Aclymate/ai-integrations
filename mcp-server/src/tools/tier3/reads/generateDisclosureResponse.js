@@ -12,9 +12,13 @@ const inputShape = {
     .min(MIN_QUESTION_LENGTH)
     .describe("The disclosure question to answer, grounded in your Aclymate data."),
   framework: z
-    .enum(["cdp", "ecovadis", "rfp", "other"])
-    .optional()
-    .describe("Optional disclosure framework the answer should target.")
+    .preprocess(
+      (val) => (typeof val === "string" ? val.toLowerCase().trim() : val),
+      z.enum(["cdp", "ecovadis", "rfp", "other"]).optional()
+    )
+    .describe(
+      "Optional disclosure framework the answer should target. Case-insensitive — 'CDP', 'Cdp', and 'cdp' all resolve the same way."
+    )
 };
 
 const zodSchema = z.object(inputShape);

@@ -223,6 +223,24 @@ describe("generate_disclosure_response", () => {
     assert.ok(env.error);
     assert.equal(env.error.code, "invalid_input");
   });
+
+  test("framework is case-insensitive — 'CDP' resolves the same as 'cdp'", async () => {
+    const env = await withFetch(
+      200,
+      {
+        draft: "In the reporting period the company recorded 142.5 tCO2e.",
+        grounding: { totalTonsCo2e: 142.5, framework: "cdp" },
+        warnings: []
+      },
+      () =>
+        generateDisclosureResponse(
+          { question: "What were our Scope 3 emissions?", framework: "CDP" },
+          { auth: buildAuth() }
+        )
+    );
+    assert.equal(env.error, null, `expected no validation error, got ${JSON.stringify(env.error)}`);
+    assert.match(env.result.draft, /142\.5/);
+  });
 });
 
 describe("calculate_product_carbon_footprint", () => {
