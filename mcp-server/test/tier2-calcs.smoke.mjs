@@ -201,6 +201,45 @@ test("calculate_office_utility_emissions — omits absent utility types rather t
   assert.ok(!("water" in env.result.breakdown));
 });
 
+test("calculate_office_utility_emissions — electric line-item with no eGrid warns + downgrades to medium, matching calculate_electricity_emissions", async () => {
+  const env = await calcOfficeUtility({
+    utilities: [{ type: "electric", quantity: 1000, unit: "kwh" }]
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "medium");
+  const warning = env.warnings.find((w) => w.code === "conservative_default");
+  assert.ok(warning, "expected a conservative_default warning, same as calculate_electricity_emissions");
+});
+
+test("calculate_office_utility_emissions — electric line-item with a real eGrid stays high confidence, no warning", async () => {
+  const env = await calcOfficeUtility({
+    utilities: [{ type: "electric", quantity: 1000, unit: "kwh", eGrid: "CAMX" }]
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "high");
+  assert.equal(env.warnings.length, 0);
+});
+
+test("calculate_office_utility_emissions — unrecognized eGrid region: low confidence + unknown_region warning naming it", async () => {
+  const env = await calcOfficeUtility({
+    utilities: [{ type: "electric", quantity: 1000, unit: "kwh", eGrid: "NOT-A-REGION" }]
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "low");
+  const warning = env.warnings.find((w) => w.code === "unknown_region");
+  assert.ok(warning);
+  assert.match(warning.message, /NOT-A-REGION/);
+});
+
+test("calculate_office_utility_emissions — gas-only call never mentions eGrid at all", async () => {
+  const env = await calcOfficeUtility({
+    utilities: [{ type: "gas", quantity: 100, unit: "therms" }]
+  });
+  assertSuccessEnvelope(env);
+  assert.equal(env.confidence, "high");
+  assert.equal(env.warnings.length, 0);
+});
+
 test("resolveVehicleFactor — unknown make returns no match", () => {
   const lookup = resolveVehicleFactor({ make: "Zorp", model: "Blah", year: 2020 });
   assert.equal(lookup.match, "none");

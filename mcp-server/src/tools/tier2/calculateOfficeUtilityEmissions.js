@@ -11,7 +11,8 @@ import {
   isValidCalcResult
 } from "./factorSnapshot.js";
 
-const { calcGasEmissionsPerUnitValue, calcElectricEmissionsPerUnitValue } = utilityCalcs;
+const { calcGasEmissionsPerUnitValue, calcElectricEmissionsPerUnitValue, classifyEGrid } =
+  utilityCalcs;
 const { calcPurchasedWaterTonsCo2e } = otherCalcs;
 
 const SOURCES = [
@@ -31,7 +32,13 @@ const utilityLineItemSchema = z.union([
   z.object({
     type: z.literal("electric"),
     quantity: z.number().finite().positive(),
-    unit: z.enum(["kwh", "mwh"])
+    unit: z.enum(["kwh", "mwh"]),
+    eGrid: z
+      .string()
+      .optional()
+      .describe(
+        "US eGRID subregion code, Canadian province, or country. If omitted, defaults to MROE — the upper-bound US subregion (a conservative estimator, not a locale-specific default)."
+      )
   }),
   z.object({
     type: z.literal("water"),
@@ -55,7 +62,7 @@ const definition = {
   name: "calculate_office_utility_emissions",
   title: "Calculate Office Utility Emissions",
   description:
-    "Calculate tCO2e for office utilities (gas, electric, water) from whichever line-items you have — pass one call with all the utility types you have data for."
+    "Calculate tCO2e for office utilities (gas, electric, water) from whichever line-items you have — pass one call with all the utility types you have data for. An `electric` line-item's optional `eGrid` accepts a US eGRID subregion code, Canadian province, or country; if omitted, defaults to MROE (the upper-bound US subregion) and surfaces a conservative_default warning."
 };
 
 const buildValidationError = (parsed) =>
@@ -79,10 +86,26 @@ const calcLineItemTons = (lineItem) => {
   if (lineItem.type === "electric") {
     return calcElectricEmissionsPerUnitValue({
       unit: lineItem.unit,
-      unitValue: lineItem.quantity
+      unitValue: lineItem.quantity,
+      eGrid: lineItem.eGrid
     });
   }
   return calcPurchasedWaterTonsCo2e(lineItem.quantity, lineItem.unit);
+};
+
+// Mirrors calculate_electricity_emissions's own region handling — an "electric" line item
+// with no eGrid silently used MROE (upper-bound US subregion) at confidence: high with no
+// warning and no way to override, while the standalone electricity calculator flags the
+// same default as conservative and lets the caller set a region. Carries that same
+// classification across so multi-utility calls get the identical warning/confidence.
+const classifyElectricLineItem = (lineItem) => {
+  if (lineItem.type !== "electric") return null;
+  const eGridClass = classifyEGrid(lineItem.eGrid);
+  return {
+    eGrid: lineItem.eGrid ?? "MROE",
+    eGridClass,
+    isUnknownRegion: eGridClass === "unknown"
+  };
 };
 
 const handler = async (rawParams) => {
@@ -109,6 +132,32 @@ const handler = async (rawParams) => {
 
   const tCO2e = breakdown.reduce((sum, { tCO2e: itemTons }) => sum + itemTons, 0);
 
+  const electricClassifications = utilities.map(classifyElectricLineItem).filter(Boolean);
+  const usedDefaultMroe = electricClassifications.some((c) => c.eGridClass === "default_mroe");
+  const unknownRegions = electricClassifications
+    .filter((c) => c.isUnknownRegion)
+    .map((c) => c.eGrid);
+
+  const warnings = [
+    ...(usedDefaultMroe
+      ? [
+          {
+            code: "conservative_default",
+            message:
+              "No eGrid region supplied for one or more electric line items — used MROE (upper-bound US subregion). Provide a state, eGrid code, or country for a locale-specific estimate."
+          }
+        ]
+      : []),
+    ...(unknownRegions.length > 0
+      ? [
+          {
+            code: "unknown_region",
+            message: `Unrecognized eGrid region(s) ${unknownRegions.map((r) => `"${r}"`).join(", ")} — fell back to the IEA global average (0.475 tCO2e/MWh) for those line items.`
+          }
+        ]
+      : [])
+  ];
+
   return buildSuccessEnvelope({
     result: {
       tCO2e,
@@ -118,8 +167,11 @@ const handler = async (rawParams) => {
       )
     },
     sources: SOURCES,
-    confidence: deriveConfidence({}),
-    warnings: [],
+    confidence: deriveConfidence({
+      defaultsUsed: usedDefaultMroe,
+      unknownRegion: unknownRegions.length > 0
+    }),
+    warnings,
     factorSnapshot: FACTOR_SNAPSHOT,
     methodologyUrl: null,
     viewInAclymateUrl: null,
