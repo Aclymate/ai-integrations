@@ -12,6 +12,7 @@ process.env.RENEW_WEST_INTERNAL_API_AUDIENCE =
 const {
   withToolCallCap,
   shouldSkip,
+  isTestModeBlocked,
   TOOL_DAILY_CALL_CAPS
 } = await import("../src/middleware/toolCallCap.js");
 
@@ -70,6 +71,30 @@ describe("shouldSkip", () => {
       shouldSkip(buildAuth({ testMode: true }), "categorize_transaction"),
       false
     );
+  });
+});
+
+describe("isTestModeBlocked", () => {
+  test("test-mode key on a Plaid-backed (capped) tool is blocked", () => {
+    assert.equal(
+      isTestModeBlocked(buildAuth({ testMode: true }), "categorize_transaction"),
+      true
+    );
+  });
+  test("live key on a Plaid-backed tool is not blocked", () => {
+    assert.equal(
+      isTestModeBlocked(buildAuth({ testMode: false }), "categorize_transaction"),
+      false
+    );
+  });
+  test("test-mode key on an uncapped (non-Plaid) tool is not blocked", () => {
+    assert.equal(
+      isTestModeBlocked(buildAuth({ testMode: true }), "classify_vendor_by_industry"),
+      false
+    );
+  });
+  test("null auth is not blocked", () => {
+    assert.equal(isTestModeBlocked(null, "categorize_transaction"), false);
   });
 });
 
@@ -141,30 +166,30 @@ describe("withToolCallCap — allowed path", () => {
     }
   });
 
-  test("test-mode key: still consults the counter (does NOT skip like C6's rate limit)", async () => {
+});
+
+describe("withToolCallCap — test-mode blocked path (Tier-3 MSA §4.6)", () => {
+  test("test-mode key on a Plaid-backed tool: no fetch, no handler, test_mode_tool_blocked (403)", async () => {
     let fetchCalled = false;
+    let handlerCalled = false;
     const restore = stubFetch(async () => {
       fetchCalled = true;
-      return {
-        ok: true,
-        status: 200,
-        text: async () =>
-          JSON.stringify({
-            allowed: true,
-            callsRemainingToday: 49,
-            dailyLimit: 50,
-            resetAtIso: "2026-07-10T00:00:00.000Z"
-          })
-      };
+      return { ok: true, status: 200, text: async () => "{}" };
     });
     try {
       const wrapped = withToolCallCap(
         "categorize_transaction",
-        async () => ({ result: {}, error: null }),
+        async () => {
+          handlerCalled = true;
+          return { result: {}, error: null };
+        },
         { getAuth: () => buildAuth({ testMode: true }) }
       );
-      await wrapped({}, {});
-      assert.equal(fetchCalled, true, "expected the counter to be consulted for test-mode keys");
+      const result = await wrapped({}, {});
+      assert.equal(fetchCalled, false, "a test-mode key must never reach the counter or Plaid");
+      assert.equal(handlerCalled, false);
+      assert.equal(result.error.code, "test_mode_tool_blocked");
+      assert.equal(result.error.http_status, 403);
     } finally {
       restore();
     }

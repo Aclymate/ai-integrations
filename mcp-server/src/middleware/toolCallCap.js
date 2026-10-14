@@ -12,7 +12,8 @@ const TOOL_DAILY_CALL_CAPS = Object.freeze({
 });
 
 // Unlike withRateLimit's shouldSkip, this does NOT skip testMode — test keys
-// hit real Plaid, so the cap must apply to them too (deliberate deviation).
+// are blocked outright (see isTestModeBlocked below) rather than exempted
+// from the cap, so they must still reach this middleware.
 const shouldSkip = (auth, toolName) => {
   if (!(toolName in TOOL_DAILY_CALL_CAPS)) {
     return true;
@@ -22,6 +23,22 @@ const shouldSkip = (auth, toolName) => {
   }
   return false;
 };
+
+// Tier-3 MSA Addendum §4.6 promises test-mode keys accrue no Plaid spend.
+// Every tool with a daily call cap here is Plaid-backed, so a test-mode key
+// calling one is rejected before it reaches Plaid (or even the counter) —
+// not merely capped at 0, which would still cost a real Plaid call once.
+const isTestModeBlocked = (auth, toolName) =>
+  Boolean(auth?.testMode) && toolName in TOOL_DAILY_CALL_CAPS;
+
+const buildTestModeBlockedErrorEnvelope = () =>
+  buildErrorEnvelope({
+    code: "test_mode_tool_blocked",
+    http_status: 403,
+    message:
+      "This tool calls Plaid and cannot be invoked with a test-mode API key. Use a live key to call it.",
+    upgradeHint: null
+  });
 
 const buildCapUpgradeHint = () => ({
   trigger: "tool_daily_cap",
@@ -56,6 +73,14 @@ const withToolCallCap = (toolName, handler, options) => {
   const { getAuth } = options;
   return async (params, extra) => {
     const auth = getAuth();
+    if (isTestModeBlocked(auth, toolName)) {
+      emitStructuredWarning({
+        event: "test_mode_tool_blocked",
+        toolName,
+        keyMasked: auth.keyId ? auth.keyId.slice(-4) : null
+      });
+      return buildTestModeBlockedErrorEnvelope();
+    }
     if (shouldSkip(auth, toolName)) {
       return handler(params, extra);
     }
@@ -95,4 +120,4 @@ const withToolCallCap = (toolName, handler, options) => {
   };
 };
 
-export { withToolCallCap, shouldSkip, TOOL_DAILY_CALL_CAPS };
+export { withToolCallCap, shouldSkip, isTestModeBlocked, TOOL_DAILY_CALL_CAPS };
